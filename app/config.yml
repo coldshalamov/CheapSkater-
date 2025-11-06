@@ -1,0 +1,22 @@
+retailers:
+  lowes:
+    enabled: true
+    zips: ["98101","98115","98052","98402","99201","98661","97204","97223","97005","97301","97401","97702"]
+    categories:
+      - name: "Flooring"
+        url: "PASTE_REAL_CATEGORY_URL_AFTER_SETTING_STORE"
+      - name: "Electrical"
+        url: "PASTE_REAL_CATEGORY_URL_AFTER_SETTING_STORE"
+  homedepot:
+    enabled: false
+    zips: []
+    categories: []
+schedule:
+  minutes: 180
+alerts:
+  pct_drop: 0.25
+  abs_thresholds: {}
+output:
+  csv_path: "outputs/orwa_items.csv"
+  sqlite_path: "orwa_lowes.sqlite"
+healthcheck_url: ""
