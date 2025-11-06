@@ -106,3 +106,14 @@ When configuring the action step of a scheduled task, set:
 - **Program/script**: `C:\path\to\lowes-orwa-tracker\.venv\Scripts\python.exe`
 - **Add arguments**: `-m app.main`
 - **Start in (IMPORTANT)**: `C:\path\to\lowes-orwa-tracker`
+
+### Detailed configuration checklist
+
+- **Where to click**: Create Basic Task.
+- **Trigger**: Daily; Repeat every **3 hours** for a duration of **1 day**; Enabled.
+- **Action**:
+  - **Program/script**: `C:\path\to\lowes-orwa-tracker\.venv\Scripts\python.exe`
+  - **Add arguments**: `-m app.main`
+  - **Start in**: `C:\path\to\lowes-orwa-tracker`
+- **Options**: Check **Run whether user is logged on or not**.
+- **Test**: After saving, right-click the task and choose **Run**.
