@@ -309,7 +309,9 @@ async def run_for_zip(playwright: Any, zip_code: str, categories: list[dict]) ->
             pass
         page = await context.new_page()
 
-        await set_store_context(page, zip_code)
+        store_id, store_name = await set_store_context(page, zip_code)
+        store_id = store_id or f"zip:{zip_code}"
+        store_name = store_name or f"Lowe's {zip_code}"
 
         rows: list[dict] = []
         for category in categories:
@@ -320,6 +322,11 @@ async def run_for_zip(playwright: Any, zip_code: str, categories: list[dict]) ->
 
             LOGGER.info("Starting category '%s' for ZIP %s", name, zip_code)
             results = await scrape_category(page, url, name, zip_code)
+            for record in results:
+                if not record.get("store_id"):
+                    record["store_id"] = store_id
+                if not record.get("store_name"):
+                    record["store_name"] = store_name
             rows.extend(results)
             await human_wait(250, 900)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -50,6 +50,7 @@ class Observation(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
     availability: Mapped[str | None] = mapped_column(String, nullable=True)
+    clearance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         Index("ix_observations_store_id", "store_id"),

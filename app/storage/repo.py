@@ -13,6 +13,40 @@ from app.extractors import schemas
 from .models_sql import Alert, Item, Observation, Store
 
 
+def upsert_store(
+    session: Session,
+    store_id: str,
+    retailer: str,
+    name: str,
+    city: str,
+    state: str,
+    zip_code: str,
+) -> None:
+    """Insert or update a :class:`Store` record."""
+
+    if not store_id:
+        return
+
+    store = session.get(Store, store_id)
+    if store is None:
+        store = Store(
+            store_id=store_id,
+            retailer=retailer,
+            name=name,
+            city=city,
+            state=state,
+            zip=zip_code,
+        )
+        session.add(store)
+        return
+
+    store.retailer = retailer
+    store.name = name
+    store.city = city
+    store.state = state
+    store.zip = zip_code
+
+
 def upsert_item(session: Session, item: Item) -> None:
     """Insert or update an :class:`Item` record."""
 
@@ -72,6 +106,7 @@ def flatten_for_csv(session: Session, limit: int = 1000) -> list[schemas.Flatten
             Observation.price.label("price"),
             Observation.price_was.label("price_was"),
             Observation.availability.label("availability"),
+            Observation.clearance.label("clearance"),
             row_number.label("row_number"),
         )
         .subquery()
@@ -132,6 +167,7 @@ def flatten_for_csv(session: Session, limit: int = 1000) -> list[schemas.Flatten
                 price=row.price,
                 price_was=row.price_was,
                 pct_off=pct_off,
+                clearance=row.clearance,
                 availability=row.availability,
                 product_url=row.product_url,
                 image_url=row.image_url,
@@ -142,6 +178,18 @@ def flatten_for_csv(session: Session, limit: int = 1000) -> list[schemas.Flatten
 
 def should_alert_new_clearance(last_obs: Observation | None, new_obs: Observation) -> bool:
     """Return ``True`` if a new clearance price should trigger an alert."""
+
+    new_flag = getattr(new_obs, "clearance", None)
+    last_flag = getattr(last_obs, "clearance", None) if last_obs else None
+
+    if new_flag is True:
+        return last_flag is not True
+
+    if new_flag is False:
+        return False
+
+    if last_flag is True:
+        return False
 
     if new_obs.price is None or new_obs.price_was is None:
         return False
@@ -179,11 +227,10 @@ def should_alert_price_drop(
     return (drop >= pct_threshold, drop)
 
 
-def write_csv(rows: list[schemas.FlattenedRow], path: str) -> None:
-    """Write flattened rows to ``path`` as CSV."""
+def write_csv(rows: list[schemas.FlattenedRow], csv_path: str) -> None:
+    """Write flattened rows to ``csv_path`` as CSV."""
 
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
+    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
 
     header = [
         "ts_utc",
@@ -197,12 +244,13 @@ def write_csv(rows: list[schemas.FlattenedRow], path: str) -> None:
         "price",
         "price_was",
         "pct_off",
+        "clearance",
         "availability",
         "product_url",
         "image_url",
     ]
 
-    with open(path, "w", newline="", encoding="utf-8") as handle:
+    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(header)
         for row in rows:
@@ -221,6 +269,9 @@ def write_csv(rows: list[schemas.FlattenedRow], path: str) -> None:
                     "" if row.price is None else f"{row.price}",
                     "" if row.price_was is None else f"{row.price_was}",
                     "" if row.pct_off is None else f"{row.pct_off}",
+                    ""
+                    if row.clearance is None
+                    else ("true" if row.clearance else "false"),
                     row.availability or "",
                     row.product_url,
                     row.image_url or "",

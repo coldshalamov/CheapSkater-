@@ -52,6 +52,7 @@ class Notifier:
         was = self._format_price(obs.price_was)
         zip_code = getattr(obs, "zip", None)
         store_id = getattr(obs, "store_id", None) or obs.store_id
+        store_name = getattr(obs, "store_name", None)
         url = item.product_url
 
         lines = [f"New clearance: {title}"]
@@ -63,6 +64,8 @@ class Notifier:
             lines.append(f"% off: {pct_text}")
         if store_id:
             lines.append(f"Store: {store_id}")
+        if store_name:
+            lines.append(f"Store name: {store_name}")
         if zip_code:
             lines.append(f"ZIP: {zip_code}")
         lines.append(url)
@@ -86,6 +89,7 @@ class Notifier:
         was = self._format_price(new_obs.price_was)
         zip_code = getattr(new_obs, "zip", None)
         store_id = getattr(new_obs, "store_id", None) or new_obs.store_id
+        store_name = getattr(new_obs, "store_name", None)
         url = item.product_url
 
         lines = [f"Price drop: {title}"]
@@ -99,6 +103,8 @@ class Notifier:
             lines.append(f"Drop: {pct_text}")
         if store_id:
             lines.append(f"Store: {store_id}")
+        if store_name:
+            lines.append(f"Store name: {store_name}")
         if zip_code:
             lines.append(f"ZIP: {zip_code}")
         lines.append(url)

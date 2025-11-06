@@ -6,6 +6,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import time
 from typing import Any, Iterable
 
@@ -92,6 +93,31 @@ def _normalise_categories(
     return filtered
 
 
+def _infer_state_from_zip(zip_code: str | None) -> str:
+    if not zip_code:
+        return "UNKNOWN"
+    digits = "".join(ch for ch in zip_code if ch.isdigit())
+    if len(digits) < 3:
+        return "UNKNOWN"
+    prefix = int(digits[:3])
+    if 970 <= prefix <= 979:
+        return "OR"
+    if 980 <= prefix <= 994:
+        return "WA"
+    return "UNKNOWN"
+
+
+def _derive_city_from_store_name(store_name: str | None) -> str:
+    if not store_name:
+        return "Unknown"
+    parts = re.split(r"[-–|,]", store_name)
+    for part in parts:
+        cleaned = part.strip()
+        if cleaned:
+            return cleaned
+    return store_name.strip() or "Unknown"
+
+
 async def _run_cycle(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -123,6 +149,8 @@ async def _run_cycle(
         len(zips),
         len(categories),
     )
+
+    any_zip_success = False
 
     try:
         async with async_playwright() as playwright:
@@ -156,6 +184,8 @@ async def _run_cycle(
                     )
                     continue
 
+                any_zip_success = True
+
                 if not rows:
                     LOGGER.info(
                         "Scrape returned no rows for ZIP %s; continuing", zip_code
@@ -175,16 +205,24 @@ async def _run_cycle(
     finally:
         duration = time.monotonic() - start
 
-    _export_csv(config, session_factory)
-    _ping_healthcheck(config)
-
-    LOGGER.info(
-        "cycle ok | retailer=lowes | zips=%d | items=%d | alerts=%d | duration=%.1fs",
-        len(zips),
-        total_items,
-        total_alerts,
-        duration,
-    )
+    if any_zip_success:
+        _export_csv(config, session_factory)
+        _ping_healthcheck(config)
+        LOGGER.info(
+            "cycle ok | retailer=lowes | zips=%d | items=%d | alerts=%d | duration=%.1fs",
+            len(zips),
+            total_items,
+            total_alerts,
+            duration,
+        )
+    else:
+        LOGGER.error(
+            "cycle failed | retailer=lowes | zips=%d | items=%d | alerts=%d | duration=%.1fs",
+            len(zips),
+            total_items,
+            total_alerts,
+            duration,
+        )
     return total_items, total_alerts
 
 
@@ -213,13 +251,25 @@ async def _process_row(
 
     store_id_raw = (row.get("store_id") or "").strip()
     row_zip = (row.get("zip") or zip_code or "").strip()
-    store_id = store_id_raw or (f"zip:{row_zip}" if row_zip else f"zip:{zip_code}")
+    store_name_raw = (row.get("store_name") or "").strip()
+    store_zip = row_zip or (zip_code or "").strip()
+    store_id = store_id_raw or (f"zip:{store_zip}" if store_zip else f"zip:{zip_code}")
+    store_name = store_name_raw or f"Lowe's {store_zip or zip_code or 'unknown'}"
 
     price = row.get("price")
     price_was = row.get("price_was")
     availability = (row.get("availability") or None)
     if isinstance(availability, str):
         availability = availability.strip() or None
+
+    clearance_value = row.get("clearance")
+    clearance_flag: bool | None
+    if clearance_value is None:
+        clearance_flag = None
+    elif isinstance(clearance_value, str):
+        clearance_flag = clearance_value.strip().lower() in {"1", "true", "yes", "y"}
+    else:
+        clearance_flag = bool(clearance_value)
 
     ts_now = datetime.now(timezone.utc)
 
@@ -239,8 +289,10 @@ async def _process_row(
         price=price,
         price_was=price_was,
         availability=availability,
+        clearance=clearance_flag,
     )
-    setattr(obs_model, "zip", row_zip)
+    setattr(obs_model, "zip", store_zip)
+    setattr(obs_model, "store_name", store_name)
 
     pct_off = schemas.compute_pct_off(price, price_was)
 
@@ -248,6 +300,15 @@ async def _process_row(
 
     try:
         with session_factory() as session:
+            repo.upsert_store(
+                session,
+                store_id=store_id,
+                retailer="lowes",
+                name=store_name,
+                city=_derive_city_from_store_name(store_name),
+                state=_infer_state_from_zip(store_zip),
+                zip_code=store_zip or zip_code or "00000",
+            )
             last_obs = repo.get_last_observation(session, store_id, sku)
             repo.upsert_item(session, item_model)
             repo.insert_observation(session, obs_model)

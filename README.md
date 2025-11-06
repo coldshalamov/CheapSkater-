@@ -22,6 +22,23 @@ pip install -r requirements.txt
 python -m playwright install
 ```
 
+## Run once
+Run a single collection pass to confirm everything is wired correctly:
+
+```powershell
+python -m app.main --once
+```
+
+## Run continuously on Windows (Task Scheduler)
+1. Open **Task Scheduler** → **Create Task...**.
+2. **Triggers** → **On a schedule** → **Daily** → **Repeat task every 3 hours** (for **1 day**) → Enabled.
+3. **Actions** → **New...**, then set:
+   - **Action**: Start a program
+   - **Program/script**: `C:\path\to\repo\.venv\Scripts\python.exe`
+   - **Add arguments (optional)**: `-m app.main`
+   - **Start in:** `C:\path\to\repo`
+4. Click **OK** (recommended: enable **Run whether user is logged on or not**).
+
 ## Configuration & environment
 * `app/config.yml` — primary application configuration (store list, scrape intervals, output preferences).
 * `.env` — sensitive credentials such as Telegram bot token and chat ID, or SendGrid API key and sender address.

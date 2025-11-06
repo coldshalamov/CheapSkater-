@@ -112,6 +112,7 @@ class FlattenedRow(BaseModel):
     price: float | None = None
     price_was: float | None = None
     pct_off: float | None = None
+    clearance: bool | None = None
     availability: str | None = None
     product_url: str
     image_url: str | None = None
