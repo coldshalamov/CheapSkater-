@@ -1,9 +1,13 @@
-"""Selectors used for parsing retailer pages."""
+"""Selectors used for parsing retailer pages.
 
-# After setting the store context in Playwright or a browser, open Chrome DevTools and use
-# the "Copy selector" option to capture CSS selectors for each element.
-# Remember that Playwright supports :has-text() and other convenience pseudo-selectors,
-# but maintain a pure CSS fallback in case those helpers become unreliable.
+How to capture new selectors:
+1. Set a store by ZIP in a real browser session so inventory matches expectations.
+2. Open a category URL that lists products for that store.
+3. In Chrome DevTools, right-click the desired element and choose Copy → Copy selector
+   for each of CARD, TITLE, PRICE, WAS_PRICE, AVAIL, IMG, LINK, NEXT_BTN, STORE_BADGE.
+4. Playwright's :has-text() helper can be convenient, but always keep a pure CSS
+   fallback selector for resiliency.
+"""
 
 CARD = "TODO_CARD_SELECTOR"
 TITLE = "TODO_TITLE_SELECTOR"
