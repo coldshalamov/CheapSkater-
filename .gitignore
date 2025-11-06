@@ -9,8 +9,10 @@ __pycache__/
 *.db
 
 # Application output directories
-/logs/
-/outputs/
+/logs/*
+!/logs/.gitkeep
+/outputs/*
+!/outputs/.gitkeep
 
 # Environment and system files
 .env
