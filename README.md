@@ -117,3 +117,37 @@ When configuring the action step of a scheduled task, set:
   - **Start in**: `C:\path\to\lowes-orwa-tracker`
 - **Options**: Check **Run whether user is logged on or not**.
 - **Test**: After saving, right-click the task and choose **Run**.
+
+## Paste your selectors (checklist)
+- [ ] `CARD`
+- [ ] `TITLE`
+- [ ] `PRICE`
+- [ ] `WAS_PRICE`
+- [ ] `AVAIL`
+- [ ] `IMG`
+- [ ] `LINK`
+- [ ] `NEXT_BTN`
+- [ ] `STORE_BADGE`
+
+Reminder: set your store by ZIP inside Chrome first, then use **Copy → Copy selector** for each element before updating `app/selectors.py`.
+
+## First run checklist
+- Create a Telegram bot or obtain a SendGrid API key.
+- Populate `.env` with Telegram/SendGrid credentials plus optional `LOG_LEVEL`, `USER_AGENT`, and `HTTP_PROXY`.
+- Add ZIP codes and category URLs to `app/config.yml`.
+- Paste your CSS selectors into `app/selectors.py`.
+- `pip install -r requirements.txt`
+- `python -m playwright install`
+- Test a single pass with `python -m app.main --once`
+
+## Troubleshooting
+- **Store not set** → Fix `STORE_BADGE`; manually confirm you can change stores in the browser.
+- **Zero cards captured** → Update `CARD`; verify the category URL still renders results after setting the store.
+- **Prices returning `None`** → Double-check `PRICE` and `WAS_PRICE`; the regex already supports `$` and commas.
+- **Alerts not sending** → Confirm `.env` values and try a Telegram notification before switching providers.
+
+## Scaling notes
+- Queue jobs for additional stores.
+- Store observations in Postgres for concurrency-safe writes.
+- Run parallel workers behind optional proxies.
+- Point a Metabase dashboard at the warehouse for monitoring.
