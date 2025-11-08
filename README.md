@@ -24,6 +24,7 @@ python -m app.main --probe --zip 98101
 # Run a single scrape cycle (all discovered stores + catalog URLs)
 python -m app.main --once
 ```
+- Optional: copy `.env.example` to `.env` and set `USER_AGENT=` to override the default Playwright user agent if a custom string is required.
 - `--probe` sets the store, opens the first catalog URL, and asserts that cards, titles, and prices are present. It fails fast if selectors drift.
 - `--once` runs the entire loop (all ZIPs + catalog URLs) one time. A successful cycle prints:
   ```
@@ -45,7 +46,7 @@ python -m app.main --once
 - `catalog/all.lowes.yml` — populated by `python -m app.main --discover-categories`; contains every Lowe's `/c/` and `/pl/` URL found in the public navigation/department pages.
 - `catalog/wa_or_stores.yml` — populated by `python -m app.main --discover-stores`; contains every Washington & Oregon Lowe's ZIP pulled from the public store locator UI.
 - `app/selectors.py` — the only place CSS selectors live. Update these constants if Lowe’s changes markup.
-- `.env` (copy from `.env.example`) — Telegram/SendGrid credentials plus optional overrides like `LOG_LEVEL`, `HTTP_PROXY`, or a custom User-Agent. If no transport is configured, alerts are logged only.
+- `.env` (copy from `.env.example`) — Telegram/SendGrid credentials plus optional overrides like `LOG_LEVEL`, `HTTP_PROXY`, or a custom `USER_AGENT` string. If no transport is configured, alerts are logged only.
 
 ## What each run does
 1. Discovery (optional) builds `catalog/all.lowes.yml` and `catalog/wa_or_stores.yml` directly from the Lowe's public DOM—no hand curation required.
@@ -63,13 +64,14 @@ python -m app.main --once
 - `--probe` — quick markup sanity check (optionally accepts `--zip`).
 - `--zip 98101,97204` — override the ZIP list (comma separated).
 - `--categories "roof|insulation"` — regex/substring filter applied to catalog names (case-insensitive).
+- `--concurrency 4` — number of ZIP codes to process in parallel (default `1`).
 
 ## Alerts
 Alerts fire when:
 1. Clearance flips from False/None to True for a `(store_id, sku)` pair.
 2. The new price is less than or equal to `last_price * (1 - alerts.pct_drop)`.
 
-If Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) or SendGrid (`SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_TO`) credentials are present, alerts are sent; otherwise they remain in the SQLite `alerts` table and the logs.
+If Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) or SendGrid (`SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_TO`) credentials are present, alerts are sent with exponential backoff retries and a 1 msg/sec rate limit; otherwise they remain in the SQLite `alerts` table and the logs.
 
 ## Troubleshooting
 - **Selector drift** → run `python -m app.main --probe --zip 98101 --categories flooring` to confirm the failure and adjust `app/selectors.py`.

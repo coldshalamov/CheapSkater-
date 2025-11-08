@@ -61,6 +61,7 @@ class Observation(Base):
 
     __table_args__ = (
         Index("ix_observations_store_sku_ts", "store_id", "sku", "ts_utc"),
+        Index("ix_observations_store_id", "store_id"),
     )
 
 

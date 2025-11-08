@@ -29,9 +29,14 @@ def parse_price(text: str | None) -> float | None:
 
     number = match.group("number").replace(",", "")
     try:
-        return float(number)
+        value = float(number)
     except (TypeError, ValueError):
         return None
+
+    if value <= 0 or value >= 100_000:
+        return None
+
+    return value
 
 
 def compute_pct_off(price: float | None, was: float | None) -> float | None:
@@ -46,7 +51,10 @@ def compute_pct_off(price: float | None, was: float | None) -> float | None:
     if price >= was:
         return None
 
-    return (was - price) / was
+    try:
+        return (was - price) / was
+    except ZeroDivisionError:  # pragma: no cover - defensive
+        return None
 
 
 def _coerce_datetime(value: Any, field_name: str) -> datetime:

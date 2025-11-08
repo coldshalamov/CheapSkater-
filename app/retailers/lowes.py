@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -15,6 +16,14 @@ from app.extractors.dom_utils import human_wait, inner_text_safe, paginate_or_sc
 from app.logging_config import get_logger
 
 LOGGER = get_logger(__name__)
+
+
+def _resolve_user_agent() -> str | None:
+    value = os.getenv("USER_AGENT")
+    if not value:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
 
 CLEARANCE_RE = re.compile(
     r"\b(clearance|closeout|last\s*chance|final\s*price|special\s*value|new\s*lower\s*price)\b",
@@ -111,8 +120,25 @@ async def _locator_or_none(root: Any, selector: str | None) -> Any | None:
     wait=wait_random_exponential(multiplier=0.5, max=5),
     reraise=True,
 )
-async def set_store_context(page: Any, zip_code: str) -> tuple[str, str]:
+async def set_store_context(
+    page: Any,
+    zip_code: str,
+    *,
+    user_agent: str | None = None,
+) -> tuple[str, str]:
     """Set the Lowe's store context for *zip_code* and return (store_id, store_name)."""
+
+    if user_agent is None:
+        user_agent = _resolve_user_agent()
+
+    if user_agent:
+        try:
+            await page.context.set_extra_http_headers({"User-Agent": user_agent})
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.debug(
+                "Unable to set USER_AGENT override; continuing with default",
+                extra={"zip": zip_code},
+            )
 
     try:
         await page.goto("https://www.lowes.com/", wait_until="domcontentloaded")
@@ -210,7 +236,12 @@ async def set_store_context(page: Any, zip_code: str) -> tuple[str, str]:
     if store_id is None:
         store_id = f"{zip_code}:{store_name.strip()}"
 
-    LOGGER.info("store=%s zip=%s", store_name.strip(), zip_code)
+    LOGGER.info(
+        "store=%s zip=%s",
+        store_name.strip(),
+        zip_code,
+        extra={"zip": zip_code},
+    )
     return store_id.strip(), store_name.strip()
 
 
@@ -234,23 +265,52 @@ async def scrape_category(
     await _safe_wait_for_load(page, "networkidle")
     await human_wait()
 
+    card_locator = page.locator(selectors.CARD)
+    alt_locator = (
+        page.locator(selectors.CARD_ALT)
+        if getattr(selectors, "CARD_ALT", None)
+        else None
+    )
+    active_locator = card_locator
+    using_alt = False
+
     try:
-        await page.locator(selectors.CARD).first.wait_for(
-            state="visible", timeout=15000
-        )
-    except Exception:
-        pass
+        await active_locator.first.wait_for(state="visible", timeout=15000)
+    except Exception as exc:
+        if alt_locator is not None:
+            try:
+                await alt_locator.first.wait_for(state="visible", timeout=15000)
+                active_locator = alt_locator
+                using_alt = True
+            except Exception as alt_exc:
+                raise SelectorChangedError(
+                    "Initial product cards failed to load.",
+                    url=url,
+                    zip_code=zip_code,
+                    category=category_name,
+                ) from alt_exc
+        else:
+            raise SelectorChangedError(
+                "Initial product cards failed to load.",
+                url=url,
+                zip_code=zip_code,
+                category=category_name,
+            ) from exc
 
     products: list[dict[str, Any]] = []
     seen_keys: set[tuple[str | None, str | None]] = set()
     pages = 0
 
     while True:
-        card_locator = page.locator(selectors.CARD)
         try:
-            card_count = await card_locator.count()
+            card_count = await active_locator.count()
         except Exception:
             card_count = 0
+
+        if card_count == 0 and not using_alt and alt_locator is not None:
+            active_locator = alt_locator
+            using_alt = True
+            continue
 
         if card_count == 0:
             if pages == 0:
@@ -263,7 +323,7 @@ async def scrape_category(
             break
 
         for index in range(card_count):
-            card = card_locator.nth(index)
+            card = active_locator.nth(index)
             record = await _extract_card(
                 card,
                 url=url,
@@ -273,7 +333,10 @@ async def scrape_category(
             )
             if record is None:
                 continue
-            key = (record.get("sku"), record.get("product_url"))
+            key = (
+                record.get("sku") or record.get("product_url"),
+                record.get("product_url"),
+            )
             if key in seen_keys:
                 continue
             seen_keys.add(key)
@@ -299,6 +362,7 @@ async def scrape_category(
         len(products),
         category_name,
         zip_code,
+        extra={"zip": zip_code, "category": category_name, "url": url},
     )
     return products
 
@@ -314,6 +378,11 @@ async def _extract_card(
     title = await inner_text_safe(await _locator_or_none(card, selectors.TITLE))
     price_text = await inner_text_safe(await _locator_or_none(card, selectors.PRICE))
     price = schemas.parse_price(price_text)
+    if price is None and getattr(selectors, "PRICE_ALT", None):
+        alt_price_text = await inner_text_safe(
+            await _locator_or_none(card, selectors.PRICE_ALT)
+        )
+        price = schemas.parse_price(alt_price_text)
     if price is None:
         price = schemas.parse_price(await inner_text_safe(card))
     was_text = await inner_text_safe(await _locator_or_none(card, selectors.WAS_PRICE))
@@ -385,19 +454,32 @@ async def run_for_zip(
     categories: list[dict[str, Any]],
     *,
     clearance_threshold: float = 0.25,
+    browser: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Execute the Lowe's workflow for a single ZIP."""
 
-    browser = await playwright.chromium.launch(headless=True)
-    context = await browser.new_context(
-        viewport={"width": 1440, "height": 900},
-        user_agent="lowes-orwa-tracker/1.0 (contact: you@example.com)",
-        storage_state=None,
-    )
+    user_agent = _resolve_user_agent()
+    owns_browser = browser is None
+    if owns_browser:
+        browser = await playwright.chromium.launch(headless=True)
+
+    context_kwargs: dict[str, Any] = {
+        "viewport": {"width": 1440, "height": 900},
+        "storage_state": None,
+    }
+    if user_agent:
+        context_kwargs["user_agent"] = user_agent
+
+    assert browser is not None
+    context = await browser.new_context(**context_kwargs)
     page = await context.new_page()
 
     try:
-        store_id, store_name = await set_store_context(page, zip_code)
+        store_id, store_name = await set_store_context(
+            page,
+            zip_code,
+            user_agent=user_agent,
+        )
         results: list[dict[str, Any]] = []
 
         for category in categories:
@@ -406,7 +488,12 @@ async def run_for_zip(
             if not name or not url:
                 continue
 
-            LOGGER.info("Starting category=%s zip=%s", name, zip_code)
+            LOGGER.info(
+                "Starting category=%s zip=%s",
+                name,
+                zip_code,
+                extra={"zip": zip_code, "category": name, "url": url},
+            )
 
             @retry(
                 stop=stop_after_attempt(3),
@@ -434,9 +521,19 @@ async def run_for_zip(
     finally:
         try:
             await context.close()
-        except Exception:
-            pass
-        try:
-            await browser.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning(
+                "Failed to close browser context: %s",
+                exc,
+                extra={"zip": zip_code},
+            )
+        if owns_browser:
+            assert browser is not None  # for type checking
+            try:
+                await browser.close()
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to close browser: %s",
+                    exc,
+                    extra={"zip": zip_code},
+                )
