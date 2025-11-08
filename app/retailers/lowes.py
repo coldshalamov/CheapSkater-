@@ -204,6 +204,24 @@ def _text_contains_clearance(text: str | None) -> bool:
 async def scrape_category(page: Any, url: str, category_name: str, zip_code: str) -> list[dict]:
     """Scrape a Lowe's category page for the specified ZIP code."""
 
+    def _is_placeholder(value: str | None) -> bool:
+        return isinstance(value, str) and value.strip().upper().startswith("TODO_")
+
+    critical_selectors = [
+        selectors.CARD,
+        selectors.TITLE,
+        selectors.PRICE,
+        selectors.LINK,
+        selectors.STORE_BADGE,
+    ]
+    if any(_is_placeholder(selector) for selector in critical_selectors):
+        raise SelectorChangedError(
+            message="SELECTORS_NOT_CONFIGURED",
+            url=url,
+            zip_code=zip_code,
+            category=category_name,
+        )
+
     LOGGER.info("Scraping Lowe's category '%s' for ZIP %s", category_name, zip_code)
 
     try:

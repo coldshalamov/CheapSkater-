@@ -230,6 +230,7 @@ def should_alert_price_drop(
 def write_csv(rows: list[schemas.FlattenedRow], csv_path: str) -> None:
     """Write flattened rows to ``csv_path`` as CSV."""
 
+    # Ensure output directory exists for portability (e.g., "outputs/")
     os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
 
     header = [
