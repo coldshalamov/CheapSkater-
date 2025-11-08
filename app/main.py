@@ -16,14 +16,22 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
+from app.catalog.discover_lowes import (
+    discover_categories,
+    discover_stores_WA_OR,
+    write_catalog_yaml,
+    write_zips_yaml,
+)
 from app.alerts.notifier import Notifier
 from app.errors import PageLoadError, SelectorChangedError, StoreContextError
 from app.extractors import schemas
+from app.extractors.dom_utils import human_wait
 from app.logging_config import get_logger
-from app.retailers.lowes import run_for_zip
+from app.retailers.lowes import run_for_zip, set_store_context
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session
 from app.storage.models_sql import Alert, Observation
+import app.selectors as selectors
 
 
 LOGGER = get_logger(__name__)
@@ -39,6 +47,16 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--once",
         action="store_true",
         help="Run the pipeline a single time instead of on a schedule.",
+    )
+    parser.add_argument(
+        "--discover-categories",
+        action="store_true",
+        help="Run catalog discovery for Lowe's and write catalog/all.lowes.yml.",
+    )
+    parser.add_argument(
+        "--discover-stores",
+        action="store_true",
+        help="Discover all WA/OR Lowe's stores and write catalog/wa_or_stores.yml.",
     )
     parser.add_argument(
         "--probe",
@@ -109,6 +127,37 @@ def _load_catalog(path: Path) -> list[dict[str, str]]:
     return cleaned
 
 
+def _resolve_config_path(path_value: str | Path | None) -> Path:
+    if not path_value:
+        raise RuntimeError("Missing configuration path value.")
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
+
+
+def _resolve_catalog_path(config: dict[str, Any]) -> Path:
+    retailers = config.get("retailers", {})
+    lowes_conf = retailers.get("lowes", {})
+    catalog_value = lowes_conf.get("catalog_path") or config.get("catalog_path")
+    if not catalog_value:
+        raise RuntimeError("catalog_path is missing in app/config.yml")
+    return _resolve_config_path(catalog_value)
+
+
+def _load_zips_file(path: Path) -> list[str]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"ZIP file not found: {path}. Run `python -m app.main --discover-stores` first."
+        )
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    zips = [str(z).strip() for z in data.get("zips", []) if str(z).strip()]
+    if not zips:
+        raise RuntimeError(f"No ZIP codes defined in {path}")
+    return zips
+
+
 def _filter_categories(
     categories: list[dict[str, str]], pattern: re.Pattern[str] | None
 ) -> list[dict[str, str]]:
@@ -125,8 +174,19 @@ def _filter_categories(
 def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]:
     retailers = config.get("retailers", {})
     lowes_conf = retailers.get("lowes", {})
-    base = args.zips or [str(z) for z in lowes_conf.get("zips", [])]
-    return [zip_code for zip_code in base if zip_code]
+    if args.zips:
+        return [zip_code for zip_code in args.zips if zip_code]
+
+    zips_path = lowes_conf.get("zips_path")
+    if zips_path:
+        path = _resolve_config_path(zips_path)
+        return _load_zips_file(path)
+
+    base = [str(z) for z in lowes_conf.get("zips", [])]
+    zips = [zip_code for zip_code in base if zip_code]
+    if not zips:
+        raise RuntimeError("No ZIP codes configured. Provide zips or run discovery.")
+    return zips
 
 
 def _get_pct_threshold(config: dict[str, Any]) -> float:
@@ -175,9 +235,7 @@ async def _run_cycle(
     total_items = 0
     total_alerts = 0
 
-    retailers = config.get("retailers", {})
-    lowes_conf = retailers.get("lowes", {})
-    zips = args.zips or [str(z) for z in lowes_conf.get("zips", [])]
+    zips = _resolve_zips(args, config)
 
     if not zips:
         LOGGER.warning("No ZIP codes configured; skipping cycle")
@@ -187,7 +245,7 @@ async def _run_cycle(
         LOGGER.warning("No categories available; skipping cycle")
         return total_items, total_alerts
 
-    pct_threshold = float(config.get("alerts", {}).get("pct_drop", 0.25) or 0.25)
+    pct_threshold = _get_pct_threshold(config)
 
     LOGGER.info(
         "Starting run cycle | retailer=lowes | zips=%d | categories=%d",
@@ -289,25 +347,80 @@ async def _run_probe(
 
     target_zip = zips[0]
     target_category = categories[0]
-    pct_threshold = _get_pct_threshold(config)
+    category_url = target_category["url"]
 
     async with async_playwright() as playwright:
-        rows = await run_for_zip(
-            playwright,
-            target_zip,
-            [target_category],
-            clearance_threshold=pct_threshold,
+        browser = await playwright.chromium.launch(headless=True)
+        context = await browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            user_agent="lowes-orwa-tracker/1.0 (contact: you@example.com)",
+            storage_state=None,
         )
+        page = await context.new_page()
 
-    titles = sum(1 for row in rows if row.get("title"))
-    priced = sum(1 for row in rows if row.get("price") is not None)
+        try:
+            card_count = 0
+            title_count = 0
+            price_count = 0
+            await set_store_context(page, target_zip)
+            await page.goto(category_url, wait_until="domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+            await human_wait()
+
+            cards = page.locator(selectors.CARD)
+            try:
+                await cards.first.wait_for(state="visible", timeout=15000)
+            except Exception as exc:
+                raise SelectorChangedError(
+                    "Probe failed: product cards missing.",
+                    url=category_url,
+                    zip_code=target_zip,
+                    category=target_category["name"],
+                ) from exc
+
+            card_count = await cards.count()
+            if card_count == 0:
+                raise SelectorChangedError(
+                    "Probe failed: zero product cards.",
+                    url=category_url,
+                    zip_code=target_zip,
+                    category=target_category["name"],
+                )
+
+            title_count = await cards.locator(selectors.TITLE).count()
+            if title_count == 0:
+                raise SelectorChangedError(
+                    "Probe failed: title selector returned zero matches.",
+                    url=category_url,
+                    zip_code=target_zip,
+                    category=target_category["name"],
+                )
+
+            price_count = await cards.locator(selectors.PRICE).count()
+            if price_count == 0:
+                raise SelectorChangedError(
+                    "Probe failed: price selector returned zero matches.",
+                    url=category_url,
+                    zip_code=target_zip,
+                    category=target_category["name"],
+                )
+        finally:
+            try:
+                await context.close()
+            except Exception:
+                pass
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
     print(
         "probe ok | zip={zip} | category={category} | cards={cards} | titles={titles} | prices={prices}".format(
             zip=target_zip,
             category=target_category["name"],
-            cards=len(rows),
-            titles=titles,
-            prices=priced,
+            cards=card_count,
+            titles=title_count,
+            prices=price_count,
         )
     )
 
@@ -526,9 +639,11 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
     LOGGER.info(
-        "Parsed arguments: once=%s probe=%s retailer=%s zips=%s categories_pattern=%s",
+        "Parsed arguments: once=%s probe=%s discover_categories=%s discover_stores=%s retailer=%s zips=%s categories_pattern=%s",
         args.once,
         args.probe,
+        args.discover_categories,
+        args.discover_stores,
         args.retailer,
         args.zips,
         getattr(args, "categories_pattern", None).pattern  # type: ignore[attr-defined]
@@ -541,12 +656,49 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     config_path = Path("app/config.yml")
     config = _load_config(config_path)
 
-    catalog_path = config.get("catalog_path")
-    if not catalog_path:
-        raise RuntimeError("catalog_path is missing in app/config.yml")
-    catalog_file = Path(catalog_path)
-    if not catalog_file.is_absolute():
-        catalog_file = Path.cwd() / catalog_file
+    catalog_file = _resolve_catalog_path(config)
+    retailers = config.get("retailers", {})
+    lowes_conf = retailers.get("lowes", {})
+    zips_path_value = lowes_conf.get("zips_path")
+    zips_file = _resolve_config_path(zips_path_value) if zips_path_value else None
+
+    if args.discover_categories or args.discover_stores:
+        async with async_playwright() as playwright:
+            if args.discover_categories:
+                categories = await discover_categories(playwright)
+                if not categories:
+                    raise RuntimeError(
+                        "Discovery returned zero catalog URLs. Check selectors or rerun later."
+                    )
+                write_catalog_yaml(catalog_file, categories)
+                LOGGER.info(
+                    "Discovered %d Lowe's catalog URLs -> %s",
+                    len(categories),
+                    catalog_file,
+                )
+            if args.discover_stores:
+                if zips_file is None:
+                    raise RuntimeError(
+                        "zips_path is missing in configuration; cannot write discovery results."
+                    )
+                stores = await discover_stores_WA_OR(playwright)
+                if not stores:
+                    raise RuntimeError(
+                        "Discovery returned zero stores. Check selectors or rerun later."
+                    )
+                write_zips_yaml(zips_file, stores)
+                LOGGER.info(
+                    "Discovered %d Lowe's WA/OR stores -> %s",
+                    len(stores),
+                    zips_file,
+                )
+        return
+
+    if not catalog_file.exists():
+        raise FileNotFoundError(
+            f"Catalog file not found at {catalog_file}. Run `python -m app.main --discover-categories` first."
+        )
+
     catalog_categories = _load_catalog(catalog_file)
     categories = _filter_categories(catalog_categories, getattr(args, "categories_pattern", None))
     if not categories:
