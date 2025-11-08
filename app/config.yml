@@ -4,11 +4,13 @@ retailers:
     zips: ["98101","98115","98052","98402","99201","98661","97204","97223","97005","97301","97401","97702"]
     categories:
       - name: "Flooring"
+        # Paste the Flooring **category URL after setting store** in the browser
         url: "PASTE_REAL_CATEGORY_URL_AFTER_SETTING_STORE"
       - name: "Electrical"
+        # Paste the Electrical **category URL after setting store** in the browser
         url: "PASTE_REAL_CATEGORY_URL_AFTER_SETTING_STORE"
   homedepot:
-    enabled: false
+    enabled: false  # HD adapter intentionally disabled in pilot; CLI rejects non-lowes
     zips: []
     categories: []
 schedule:

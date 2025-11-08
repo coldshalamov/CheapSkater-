@@ -42,7 +42,6 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--retailer",
-        choices=["lowes", "homedepot"],
         default="lowes",
         help="Retailer to target for scraping.",
     )
@@ -58,6 +57,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
+
+    retailer_value = (args.retailer or "").strip().lower()
+    if retailer_value and retailer_value != "lowes":
+        parser.error("Only 'lowes' is supported in pilot. Home Depot is not yet implemented.")
+    args.retailer = retailer_value or "lowes"
 
     args.zips = (
         [zip_code.strip() for zip_code in args.zips.split(",") if zip_code.strip()]
@@ -75,6 +79,22 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 def _load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _ensure_category_urls_configured(config: dict[str, Any]) -> None:
+    retailers = config.get("retailers") or {}
+    lowes_conf = retailers.get("lowes") or {}
+    categories = lowes_conf.get("categories") or []
+    bad_urls = [
+        category
+        for category in categories
+        if isinstance(category, dict)
+        and str(category.get("url") or "").strip().upper().startswith("PASTE_")
+    ]
+    if bad_urls:
+        raise RuntimeError(
+            "CONFIG_CATEGORY_URLS_REQUIRED: Paste real category URLs into app/config.yml (see README)."
+        )
 
 
 def _normalise_categories(
@@ -411,14 +431,12 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         args.categories,
     )
 
-    if args.retailer != "lowes":
-        LOGGER.error("Retailer '%s' is not supported yet", args.retailer)
-        return
-
     load_dotenv()
 
     config_path = Path("app/config.yml")
     config = _load_config(config_path)
+
+    _ensure_category_urls_configured(config)
 
     engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
     init_db(engine)

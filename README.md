@@ -3,6 +3,8 @@
 ## Project summary
 lowes-orwa-tracker is a store-scoped Lowe's clearance and price tracker focused on Oregon and Washington locations. It uses a DOM-first approach to read publicly visible product data without relying on hidden APIs.
 
+Pilot scope: **Lowe’s only** (Home Depot coming later).
+
 ## Legal & ethics
 * Collect data only from publicly accessible pages.
 * Schedule requests at a polite frequency and monitor load to avoid stressing Lowe's infrastructure.
@@ -29,14 +31,22 @@ Run a single collection pass to confirm everything is wired correctly:
 python -m app.main --once
 ```
 
+## Paste selectors & category URLs (first run)
+1. In a normal browser, set the Lowe’s store by ZIP.
+2. Navigate to the **Flooring** category; copy the full URL and paste into `app/config.yml` under Flooring.
+3. Do the same for **Electrical**.
+4. In `app/selectors.py`, paste real CSS/XPath for `CARD, TITLE, PRICE, WAS_PRICE, AVAIL, IMG, LINK, NEXT_BTN, STORE_BADGE`.
+5. Run `python -m app.main --once` and verify the summary line.
+
 ## Run continuously on Windows (Task Scheduler)
 1. Open **Task Scheduler** → **Create Task...**.
 2. **Triggers** → **On a schedule** → **Daily** → **Repeat task every 3 hours** (for **1 day**) → Enabled.
 3. **Actions** → **New...**, then set:
+   - Task Scheduler
    - **Action**: Start a program
    - **Program/script**: `C:\path\to\repo\.venv\Scripts\python.exe`
-   - **Add arguments (optional)**: `-m app.main`
-   - **Start in:** `C:\path\to\repo`
+   - `-m app.main` (arguments)
+   - **Start in (optional)**: `C:\path\to\repo`
 4. Click **OK** (recommended: enable **Run whether user is logged on or not**).
 
 ## Configuration & environment
@@ -156,6 +166,14 @@ Reminder: set your store by ZIP inside Chrome first, then use **Copy → Copy se
 - `pip install -r requirements.txt`
 - `python -m playwright install`
 - Test a single pass with `python -m app.main --once`
+
+## Fail-fast errors
+| Code | Meaning / How to fix |
+|------|----------------------|
+| CONFIG_CATEGORY_URLS_REQUIRED | Paste real category URLs into `app/config.yml` (Flooring/Electrical) after setting store. |
+| SELECTORS_NOT_CONFIGURED | Fill the required CSS in `app/selectors.py` (`CARD`, `TITLE`, `PRICE`, `LINK`, `STORE_BADGE`, etc.). |
+
+> Pilot scope: **Lowe’s only**. The Home Depot adapter is intentionally disabled.
 
 ## Troubleshooting
 - **Store not set** → Fix `STORE_BADGE`; manually confirm you can change stores in the browser.
