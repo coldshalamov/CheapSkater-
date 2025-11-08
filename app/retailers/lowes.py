@@ -234,28 +234,35 @@ async def scrape_category(
     await _safe_wait_for_load(page, "networkidle")
     await human_wait()
 
-    card_locator = page.locator(selectors.CARD)
     try:
-        await card_locator.first.wait_for(state="visible", timeout=15000)
-    except Exception as exc:
-        raise PageLoadError(url=url, zip_code=zip_code, category=category_name) from exc
+        await page.locator(selectors.CARD).first.wait_for(
+            state="visible", timeout=15000
+        )
+    except Exception:
+        pass
 
     products: list[dict[str, Any]] = []
     seen_keys: set[tuple[str | None, str | None]] = set()
-    paginated = bool(selectors.NEXT_BTN and selectors.NEXT_BTN.strip())
-    processed = 0
+    pages = 0
 
     while True:
+        card_locator = page.locator(selectors.CARD)
         try:
             card_count = await card_locator.count()
         except Exception:
             card_count = 0
 
         if card_count == 0:
+            if pages == 0:
+                raise SelectorChangedError(
+                    "No product cards located on initial page.",
+                    url=url,
+                    zip_code=zip_code,
+                    category=category_name,
+                )
             break
 
-        start_index = 0 if paginated else processed
-        for index in range(start_index, card_count):
+        for index in range(card_count):
             card = card_locator.nth(index)
             record = await _extract_card(
                 card,
@@ -272,26 +279,16 @@ async def scrape_category(
             seen_keys.add(key)
             products.append(record)
 
-        if not paginated:
-            processed = card_count
-
+        pages += 1
         advanced = await paginate_or_scroll(page, selectors.NEXT_BTN)
         if not advanced:
             break
 
         await human_wait()
 
-        if not paginated:
-            try:
-                new_count = await card_locator.count()
-            except Exception:
-                new_count = 0
-            if new_count <= processed:
-                break
-
     if not products:
         raise SelectorChangedError(
-            "SELECTORS_NOT_CONFIGURED or zero cards rendered.",
+            "No products extracted from category.",
             url=url,
             zip_code=zip_code,
             category=category_name,

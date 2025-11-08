@@ -54,10 +54,10 @@ class Observation(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
     pct_off: Mapped[float | None] = mapped_column(Float, nullable=True)
-    clearance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     availability: Mapped[str | None] = mapped_column(String, nullable=True)
-    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     product_url: Mapped[str] = mapped_column(String, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    clearance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         Index("ix_observations_store_sku_ts", "store_id", "sku", "ts_utc"),

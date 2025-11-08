@@ -1,14 +1,6 @@
-"""Selectors used for parsing retailer pages.
+"""Centralised selectors for Lowe's scraping and discovery flows."""
 
-How to capture new selectors:
-1. Set a store by ZIP in a real browser session so inventory matches expectations.
-2. Open a category URL that lists products for that store.
-3. In Chrome DevTools, right-click the desired element and choose Copy → Copy selector
-   for each of CARD, TITLE, PRICE, WAS_PRICE, AVAIL, IMG, LINK, NEXT_BTN, STORE_BADGE.
-4. Playwright's :has-text() helper can be convenient, but always keep a pure CSS
-   fallback selector for resiliency.
-"""
-
+# ==== SCRAPE (product grid) ====
 CARD = "main :is(li,article,div):has(a[href*='/pd/'])"
 TITLE = ":scope a[href*='/pd/'], :scope h3, :scope h2"
 PRICE = ":scope :is([data-test*='price'], [data-automation-id*='price'], .price, .sale-price, .ProductPrice__price, [aria-label*='$'])"
@@ -18,3 +10,14 @@ IMG = ":scope img"
 LINK = ":scope a[href*='/pd/']"
 NEXT_BTN = "nav[aria-label='Pagination'] a[rel='next'], button[aria-label='Next'], .pagination-next a, .pagination button[aria-label='Next']"
 STORE_BADGE = "header :is([aria-label*='My Store'], [data-test*='store'], [data-automation-id*='store'], a[href*='store-details'])"
+
+# ==== DISCOVERY (nav + department hubs + store locator) ====
+GLOBAL_NAV_BUTTONS = "header nav button, header nav a"
+MEGAMENU_LINKS = "div[role='menu'] a[href^='/c/'], div[role='menu'] a[href^='/pl/']"
+DEPARTMENT_HUB_LINKS = "main a[href^='/c/'], main a[href^='/pl/']"
+PAGE_H1 = "main h1, main header h1"
+
+STORE_LOCATOR_LINK = "a[href*='store-locator'], a[href*='store-directory']"
+STORE_SEARCH_INPUT = "input[type='search'], input[placeholder*='city'], input[placeholder*='ZIP']"
+STORE_RESULT_ITEM = "[data-store-id], li:has(a[href*='store-details']), a[href*='store-details']"
+STORE_RESULT_ZIP = ":scope *, [data-zip]"
