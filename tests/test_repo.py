@@ -9,15 +9,24 @@ def _make_obs(
     clearance: bool | None,
     price: float | None = None,
     price_was: float | None = None,
+    pct_off: float | None = None,
 ) -> Observation:
     return Observation(
         ts_utc=datetime.now(timezone.utc),
         store_id="store-1",
+        store_name="Store 1",
+        zip="97204",
         sku="sku-1",
+        retailer="lowes",
+        title="Item One",
+        category="Category",
+        product_url="https://example.com/pd/sku-1",
+        image_url=None,
         price=price,
         price_was=price_was,
-        availability=None,
+        pct_off=pct_off,
         clearance=clearance,
+        availability=None,
     )
 
 
@@ -38,7 +47,13 @@ def test_should_not_alert_when_clearance_false() -> None:
     assert repo.should_alert_new_clearance(last_obs, new_obs) is False
 
 
-def test_fallback_price_logic_when_flag_missing() -> None:
-    last_obs = _make_obs(clearance=None, price=100, price_was=None)
-    new_obs = _make_obs(clearance=None, price=70, price_was=110)
-    assert repo.should_alert_new_clearance(last_obs, new_obs) is True
+def test_should_alert_price_drop_threshold() -> None:
+    last_obs = _make_obs(clearance=False, price=100)
+    new_obs = _make_obs(clearance=False, price=70)
+    assert repo.should_alert_price_drop(last_obs, new_obs, 0.25) is True
+
+
+def test_should_not_alert_price_drop_when_threshold_not_met() -> None:
+    last_obs = _make_obs(clearance=False, price=100)
+    new_obs = _make_obs(clearance=False, price=90)
+    assert repo.should_alert_price_drop(last_obs, new_obs, 0.25) is False

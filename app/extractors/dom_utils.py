@@ -18,7 +18,7 @@ else:  # pragma: no cover - executed only when Playwright is absent.
     _HANDLEABLE_ERRORS = (Exception,)
 
 
-async def human_wait(min_ms: int = 200, max_ms: int = 900) -> None:
+async def human_wait(min_ms: int = 600, max_ms: int = 1600) -> None:
     """Sleep for a random, human-like interval between the provided bounds."""
 
     if min_ms < 0:
@@ -76,47 +76,37 @@ def price_to_float(text: str | None) -> float | None:
     return value
 
 
-async def paginate_or_scroll(page: Any, next_selector: str | None, max_pages: int = 25) -> None:
-    """Advance pagination or perform infinite scrolling without raising errors."""
+async def paginate_or_scroll(page: Any, next_selector: str | None, *, max_scroll_attempts: int = 4) -> bool:
+    """Advance pagination via a next button or perform an infinite scroll step.
 
-    if max_pages <= 0:
-        return
+    Returns ``True`` when additional content is likely available, otherwise ``False``.
+    """
 
     if next_selector:
-        await _paginate_by_button(page, next_selector, max_pages)
-    else:
-        await _infinite_scroll(page, max_pages)
-
-
-async def _paginate_by_button(page: Any, selector: str, max_pages: int) -> None:
-    """Click through pagination links while they remain interactable."""
-
-    for _ in range(max_pages):
         try:
-            locator = page.locator(selector)
+            locator = page.locator(next_selector).first
         except _HANDLEABLE_ERRORS:
-            break
+            return False
 
         try:
-            visible = await locator.is_visible()
-            enabled = await locator.is_enabled()
+            if await locator.count() == 0:
+                return False
+            if not (await locator.is_enabled() and await locator.is_visible()):
+                return False
         except _HANDLEABLE_ERRORS:
-            break
-
-        if not (visible and enabled):
-            break
-
-        await human_wait()
+            return False
 
         try:
             await locator.scroll_into_view_if_needed()
         except _HANDLEABLE_ERRORS:
             pass
 
+        await human_wait()
+
         try:
             await locator.click()
         except _HANDLEABLE_ERRORS:
-            break
+            return False
 
         try:
             await page.wait_for_load_state("networkidle")
@@ -124,50 +114,41 @@ async def _paginate_by_button(page: Any, selector: str, max_pages: int) -> None:
             pass
 
         await human_wait()
+        return True
 
+    baseline = await _get_scroll_height(page)
+    if baseline is None:
+        return False
 
-async def _infinite_scroll(page: Any, max_pages: int) -> None:
-    """Perform incremental scrolling until content growth stops."""
+    stagnant_readings = 0
 
-    last_height: int | None = None
-    for _ in range(max_pages):
+    for _ in range(max_scroll_attempts):
         if (
             await _safe_evaluate(
                 page,
-                "(() => { window.scrollBy(0, Math.max(400, window.innerHeight || 0)); return true; })()",
+                "(() => { window.scrollBy(0, Math.max(window.innerHeight || 0, 600)); return true; })()",
             )
             is None
         ):
-            break
+            return False
 
         await human_wait()
 
-        if (
-            await _safe_evaluate(
-                page,
-                "(() => { window.scrollTo(0, document.body ? document.body.scrollHeight || 0 : 0); return true; })()",
-            )
-            is None
-        ):
-            break
+        updated = await _get_scroll_height(page)
+        if updated is None:
+            continue
 
-        await human_wait()
+        if updated > baseline:
+            return True
 
-        height = await _safe_evaluate(
-            page, "(() => (document.body ? document.body.scrollHeight : null))()"
-        )
-        if height is None:
-            break
+        if updated == baseline:
+            stagnant_readings += 1
+            if stagnant_readings >= 2:
+                return False
+        else:
+            stagnant_readings = 0
 
-        try:
-            height_value = int(height)
-        except (TypeError, ValueError):
-            break
-
-        if last_height is not None and height_value <= last_height:
-            break
-
-        last_height = height_value
+    return False
 
 
 async def _safe_evaluate(page: Any, script: str) -> Any:
@@ -176,4 +157,16 @@ async def _safe_evaluate(page: Any, script: str) -> Any:
     try:
         return await page.evaluate(script)
     except _HANDLEABLE_ERRORS:
+        return None
+
+
+async def _get_scroll_height(page: Any) -> int | None:
+    """Return the current scroll height if available."""
+
+    value = await _safe_evaluate(page, "(() => document.body ? document.body.scrollHeight : null)()")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None

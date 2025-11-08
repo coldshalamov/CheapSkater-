@@ -23,7 +23,7 @@ from app.logging_config import get_logger
 from app.retailers.lowes import run_for_zip
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session
-from app.storage.models_sql import Alert, Item, Observation
+from app.storage.models_sql import Alert, Observation
 
 
 LOGGER = get_logger(__name__)
@@ -41,19 +41,27 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Run the pipeline a single time instead of on a schedule.",
     )
     parser.add_argument(
-        "--retailer",
-        default="lowes",
-        help="Retailer to target for scraping.",
+        "--probe",
+        action="store_true",
+        help="Set store context, load one category, and exit after reporting card counts.",
     )
     parser.add_argument(
+        "--retailer",
+        default="lowes",
+        help="Retailer to target (only 'lowes' is supported).",
+    )
+    parser.add_argument(
+        "--zip",
         "--zips",
+        dest="zips",
         type=str,
         help="Comma-separated list of ZIP codes to override configuration values.",
     )
     parser.add_argument(
         "--categories",
+        dest="categories_filter",
         type=str,
-        help="Comma-separated list of category names to filter (case-insensitive substring match).",
+        help="Regex/substring filter applied to catalog category names (case-insensitive).",
     )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -63,16 +71,19 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         parser.error("Only 'lowes' is supported in pilot. Home Depot is not yet implemented.")
     args.retailer = retailer_value or "lowes"
 
-    args.zips = (
-        [zip_code.strip() for zip_code in args.zips.split(",") if zip_code.strip()]
-        if args.zips
-        else []
-    )
-    args.categories = (
-        [cat.strip() for cat in args.categories.split(",") if cat.strip()]
-        if args.categories
-        else []
-    )
+    zip_arg = args.zips or ""
+    args.zips = [zip_code.strip() for zip_code in zip_arg.split(",") if zip_code.strip()]
+
+    pattern_text = (args.categories_filter or "").strip()
+    if pattern_text:
+        try:
+            args.categories_pattern = re.compile(pattern_text, re.IGNORECASE)
+        except re.error as exc:
+            parser.error(f"Invalid --categories pattern: {exc}")
+    else:
+        args.categories_pattern = None
+
+    args.categories_filter = None
     return args
 
 
@@ -81,36 +92,51 @@ def _load_config(path: Path) -> dict[str, Any]:
         return yaml.safe_load(handle)
 
 
-def _ensure_category_urls_configured(config: dict[str, Any]) -> None:
-    retailers = config.get("retailers") or {}
-    lowes_conf = retailers.get("lowes") or {}
-    categories = lowes_conf.get("categories") or []
-    bad_urls = [
-        category
-        for category in categories
-        if isinstance(category, dict)
-        and str(category.get("url") or "").strip().upper().startswith("PASTE_")
-    ]
-    if bad_urls:
-        raise RuntimeError(
-            "CONFIG_CATEGORY_URLS_REQUIRED: Paste real category URLs into app/config.yml (see README)."
-        )
+def _load_catalog(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        raise FileNotFoundError(f"Catalog file not found: {path}")
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    categories = data.get("categories") or []
+    cleaned: list[dict[str, str]] = []
+    for entry in categories:
+        name = str((entry or {}).get("name", "")).strip()
+        url = str((entry or {}).get("url", "")).strip()
+        if name and url:
+            cleaned.append({"name": name, "url": url})
+    if not cleaned:
+        raise RuntimeError(f"No categories defined in catalog: {path}")
+    return cleaned
 
 
-def _normalise_categories(
-    categories: list[dict[str, Any]], filters: list[str]
-) -> list[dict[str, Any]]:
-    if not filters:
+def _filter_categories(
+    categories: list[dict[str, str]], pattern: re.Pattern[str] | None
+) -> list[dict[str, str]]:
+    if pattern is None:
         return categories
-
-    needles = [needle.lower() for needle in filters]
-    filtered: list[dict[str, Any]] = []
+    filtered: list[dict[str, str]] = []
     for category in categories:
-        name = str(category.get("name", ""))
-        name_lower = name.lower()
-        if any(needle in name_lower for needle in needles):
+        name = category.get("name", "")
+        if pattern.search(name):
             filtered.append(category)
     return filtered
+
+
+def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]:
+    retailers = config.get("retailers", {})
+    lowes_conf = retailers.get("lowes", {})
+    base = args.zips or [str(z) for z in lowes_conf.get("zips", [])]
+    return [zip_code for zip_code in base if zip_code]
+
+
+def _get_pct_threshold(config: dict[str, Any]) -> float:
+    try:
+        value = float(config.get("alerts", {}).get("pct_drop", 0.25) or 0.25)
+    except (TypeError, ValueError):
+        value = 0.25
+    if value <= 0:
+        return 0.25
+    return value
 
 
 def _infer_state_from_zip(zip_code: str | None) -> str:
@@ -141,6 +167,7 @@ def _derive_city_from_store_name(store_name: str | None) -> str:
 async def _run_cycle(
     args: argparse.Namespace,
     config: dict[str, Any],
+    categories: list[dict[str, str]],
     session_factory,
     notifier: Notifier,
 ) -> tuple[int, int]:
@@ -151,15 +178,13 @@ async def _run_cycle(
     retailers = config.get("retailers", {})
     lowes_conf = retailers.get("lowes", {})
     zips = args.zips or [str(z) for z in lowes_conf.get("zips", [])]
-    categories = lowes_conf.get("categories", [])
-    categories = _normalise_categories(categories, args.categories)
 
     if not zips:
         LOGGER.warning("No ZIP codes configured; skipping cycle")
         return total_items, total_alerts
 
     if not categories:
-        LOGGER.warning("No categories matched filters; skipping cycle")
+        LOGGER.warning("No categories available; skipping cycle")
         return total_items, total_alerts
 
     pct_threshold = float(config.get("alerts", {}).get("pct_drop", 0.25) or 0.25)
@@ -176,7 +201,12 @@ async def _run_cycle(
         async with async_playwright() as playwright:
             for zip_code in zips:
                 try:
-                    rows = await run_for_zip(playwright, zip_code, categories)
+                    rows = await run_for_zip(
+                        playwright,
+                        zip_code,
+                        categories,
+                        clearance_threshold=pct_threshold,
+                    )
                 except StoreContextError as exc:
                     LOGGER.error("Unable to set store for ZIP %s: %s", zip_code, exc)
                     continue
@@ -246,6 +276,42 @@ async def _run_cycle(
     return total_items, total_alerts
 
 
+async def _run_probe(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    categories: list[dict[str, str]],
+) -> None:
+    zips = _resolve_zips(args, config)
+    if not zips:
+        raise RuntimeError("No ZIP codes available for probe.")
+    if not categories:
+        raise RuntimeError("No categories available for probe.")
+
+    target_zip = zips[0]
+    target_category = categories[0]
+    pct_threshold = _get_pct_threshold(config)
+
+    async with async_playwright() as playwright:
+        rows = await run_for_zip(
+            playwright,
+            target_zip,
+            [target_category],
+            clearance_threshold=pct_threshold,
+        )
+
+    titles = sum(1 for row in rows if row.get("title"))
+    priced = sum(1 for row in rows if row.get("price") is not None)
+    print(
+        "probe ok | zip={zip} | category={category} | cards={cards} | titles={titles} | prices={prices}".format(
+            zip=target_zip,
+            category=target_category["name"],
+            cards=len(rows),
+            titles=titles,
+            prices=priced,
+        )
+    )
+
+
 async def _process_row(
     row: dict[str, Any],
     zip_code: str,
@@ -253,130 +319,165 @@ async def _process_row(
     notifier: Notifier,
     pct_threshold: float,
 ) -> tuple[int, int]:
+    def _coerce_price(value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            return schemas.parse_price(value)
+        return None
+
+    def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
+        candidate = (raw_sku or "").strip()
+        if candidate:
+            return candidate
+        match = re.search(r"(\d{5,})", product_url)
+        return match.group(1) if match else None
+
     title = (row.get("title") or "").strip()
-    sku = (row.get("sku") or "").strip()
     category = (row.get("category") or "").strip() or "Uncategorised"
     product_url = (row.get("product_url") or "").strip()
     if product_url.startswith("/"):
         product_url = f"https://www.lowes.com{product_url}"
+    sku = _derive_sku(row.get("sku"), product_url)
     image_url = (row.get("image_url") or None)
     if isinstance(image_url, str):
         image_url = image_url.strip() or None
 
     if not title or not sku or not product_url:
-        LOGGER.debug(
-            "Skipping row with insufficient data (sku=%s title=%s)", sku, title
-        )
+        LOGGER.debug("Skipping row with insufficient data (sku=%s title=%s)", sku, title)
         return 0, 0
 
     store_id_raw = (row.get("store_id") or "").strip()
     row_zip = (row.get("zip") or zip_code or "").strip()
     store_name_raw = (row.get("store_name") or "").strip()
-    store_zip = row_zip or (zip_code or "").strip()
-    store_id = store_id_raw or (f"zip:{store_zip}" if store_zip else f"zip:{zip_code}")
-    store_name = store_name_raw or f"Lowe's {store_zip or zip_code or 'unknown'}"
+    store_zip = row_zip or (zip_code or "").strip() or "00000"
+    store_id = store_id_raw or f"zip:{store_zip}"
+    store_name = store_name_raw or f"Lowe's {store_zip}"
 
-    price = row.get("price")
-    price_was = row.get("price_was")
+    price = _coerce_price(row.get("price"))
+    price_was = _coerce_price(row.get("price_was"))
     availability = (row.get("availability") or None)
     if isinstance(availability, str):
         availability = availability.strip() or None
 
+    pct_off = row.get("pct_off")
+    if isinstance(pct_off, str):
+        try:
+            pct_off = float(pct_off)
+        except ValueError:
+            pct_off = None
+    elif isinstance(pct_off, (int, float)):
+        pct_off = float(pct_off)
+    else:
+        pct_off = None
+
+    computed_pct_off = schemas.compute_pct_off(price, price_was)
+    if pct_off is None:
+        pct_off = computed_pct_off
+
     clearance_value = row.get("clearance")
-    clearance_flag: bool | None
     if clearance_value is None:
-        clearance_flag = None
+        clearance_flag: bool | None = None
     elif isinstance(clearance_value, str):
         clearance_flag = clearance_value.strip().lower() in {"1", "true", "yes", "y"}
     else:
         clearance_flag = bool(clearance_value)
 
+    if clearance_flag is not True and pct_off is not None and pct_off >= pct_threshold:
+        clearance_flag = True
+
     ts_now = datetime.now(timezone.utc)
-
-    item_model = Item(
-        sku=sku,
-        retailer="lowes",
-        title=title,
-        category=category,
-        product_url=product_url,
-        image_url=image_url,
-    )
-
-    obs_model = Observation(
-        ts_utc=ts_now,
-        store_id=store_id,
-        sku=sku,
-        price=price,
-        price_was=price_was,
-        availability=availability,
-        clearance=clearance_flag,
-    )
-    setattr(obs_model, "zip", store_zip)
-    setattr(obs_model, "store_name", store_name)
-
-    pct_off = schemas.compute_pct_off(price, price_was)
-
     alerts_created = 0
 
     try:
         with session_factory() as session:
             repo.upsert_store(
                 session,
-                store_id=store_id,
-                retailer="lowes",
-                name=store_name,
+                store_id,
+                store_name,
+                zip_code=store_zip,
                 city=_derive_city_from_store_name(store_name),
                 state=_infer_state_from_zip(store_zip),
-                zip_code=store_zip or zip_code or "00000",
             )
             last_obs = repo.get_last_observation(session, store_id, sku)
-            repo.upsert_item(session, item_model)
+            repo.upsert_item(
+                session,
+                sku,
+                "lowes",
+                title,
+                category,
+                product_url,
+                image_url=image_url,
+            )
+            obs_model = Observation(
+                ts_utc=ts_now,
+                store_id=store_id,
+                sku=sku,
+                retailer="lowes",
+                store_name=store_name,
+                zip=store_zip,
+                title=title,
+                category=category,
+                product_url=product_url,
+                image_url=image_url,
+                price=price,
+                price_was=price_was,
+                pct_off=pct_off,
+                clearance=clearance_flag,
+                availability=availability,
+            )
             repo.insert_observation(session, obs_model)
             session.commit()
 
             new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
-            drop_ok, pct_drop = repo.should_alert_price_drop(
-                last_obs, obs_model, pct_threshold
-            )
+            price_drop = repo.should_alert_price_drop(last_obs, obs_model, pct_threshold)
 
             if new_clearance:
-                delta = 0.0
-                if obs_model.price is not None and obs_model.price_was is not None:
-                    delta = obs_model.price_was - obs_model.price
                 alert = Alert(
                     ts_utc=ts_now,
+                    alert_type="new_clearance",
                     store_id=store_id,
                     sku=sku,
-                    rule="new_clearance",
-                    old_price=obs_model.price_was,
-                    new_price=obs_model.price,
-                    delta=delta,
+                    retailer="lowes",
+                    pct_off=obs_model.pct_off,
+                    price=obs_model.price,
+                    price_was=obs_model.price_was,
+                    note=f"zip={store_zip}",
                 )
                 repo.insert_alert(session, alert)
                 session.commit()
                 try:
-                    notifier.notify_new_clearance(item_model, obs_model, pct_off)
+                    notifier.notify_new_clearance(obs_model)
                 except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.error("Notifier failed for clearance alert (sku=%s): %s", sku, exc)
+                    LOGGER.error("Notifier failed for clearance (sku=%s): %s", sku, exc)
                 alerts_created += 1
 
-            if drop_ok:
-                delta = 0.0
-                if last_obs is not None and last_obs.price is not None and obs_model.price is not None:
-                    delta = last_obs.price - obs_model.price
+            if price_drop and last_obs is not None:
+                drop_pct = None
+                if (
+                    last_obs.price is not None
+                    and last_obs.price > 0
+                    and obs_model.price is not None
+                ):
+                    drop_pct = (last_obs.price - obs_model.price) / last_obs.price
+
                 alert = Alert(
                     ts_utc=ts_now,
+                    alert_type="price_drop",
                     store_id=store_id,
                     sku=sku,
-                    rule="price_drop",
-                    old_price=last_obs.price if last_obs else None,
-                    new_price=obs_model.price,
-                    delta=delta,
+                    retailer="lowes",
+                    pct_off=drop_pct,
+                    price=obs_model.price,
+                    price_was=last_obs.price,
+                    note=f"zip={store_zip}",
                 )
                 repo.insert_alert(session, alert)
                 session.commit()
                 try:
-                    notifier.notify_price_drop(item_model, last_obs, obs_model, pct_drop)
+                    notifier.notify_price_drop(obs_model, last_obs)
                 except Exception as exc:  # pragma: no cover - defensive
                     LOGGER.error("Notifier failed for price drop (sku=%s): %s", sku, exc)
                 alerts_created += 1
@@ -385,6 +486,7 @@ async def _process_row(
         return 0, 0
 
     return 1, alerts_created
+
 
 
 def _export_csv(config: dict[str, Any], session_factory) -> None:
@@ -424,11 +526,14 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
     LOGGER.info(
-        "Parsed arguments: once=%s retailer=%s zips=%s categories=%s",
+        "Parsed arguments: once=%s probe=%s retailer=%s zips=%s categories_pattern=%s",
         args.once,
+        args.probe,
         args.retailer,
         args.zips,
-        args.categories,
+        getattr(args, "categories_pattern", None).pattern  # type: ignore[attr-defined]
+        if getattr(args, "categories_pattern", None)
+        else None,
     )
 
     load_dotenv()
@@ -436,7 +541,20 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     config_path = Path("app/config.yml")
     config = _load_config(config_path)
 
-    _ensure_category_urls_configured(config)
+    catalog_path = config.get("catalog_path")
+    if not catalog_path:
+        raise RuntimeError("catalog_path is missing in app/config.yml")
+    catalog_file = Path(catalog_path)
+    if not catalog_file.is_absolute():
+        catalog_file = Path.cwd() / catalog_file
+    catalog_categories = _load_catalog(catalog_file)
+    categories = _filter_categories(catalog_categories, getattr(args, "categories_pattern", None))
+    if not categories:
+        raise RuntimeError("No categories matched the provided filter.")
+
+    if args.probe:
+        await _run_probe(args, config, categories)
+        return
 
     engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
     init_db(engine)
@@ -445,7 +563,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     notifier = Notifier()
 
     try:
-        await _run_cycle(args, config, session_factory, notifier)
+        await _run_cycle(args, config, categories, session_factory, notifier)
     except Exception:
         LOGGER.exception("Initial run cycle failed")
         raise
@@ -461,7 +579,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 
     async def scheduled_cycle() -> None:
         try:
-            await _run_cycle(args, config, session_factory, notifier)
+            await _run_cycle(args, config, categories, session_factory, notifier)
         except Exception:
             LOGGER.exception("Scheduled run cycle failed")
 

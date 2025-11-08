@@ -17,11 +17,10 @@ class Store(Base):
 
     __tablename__ = "stores"
 
-    store_id: Mapped[str] = mapped_column(String, primary_key=True)
-    retailer: Mapped[str] = mapped_column(String, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    city: Mapped[str] = mapped_column(String, nullable=False)
-    state: Mapped[str] = mapped_column(String, nullable=False)
+    city: Mapped[str | None] = mapped_column(String, nullable=True)
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
     zip: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -45,17 +44,23 @@ class Observation(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retailer: Mapped[str] = mapped_column(String, nullable=False)
     store_id: Mapped[str] = mapped_column(String, nullable=False)
+    store_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    zip: Mapped[str | None] = mapped_column(String, nullable=True)
     sku: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
-    availability: Mapped[str | None] = mapped_column(String, nullable=True)
+    pct_off: Mapped[float | None] = mapped_column(Float, nullable=True)
     clearance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    availability: Mapped[str | None] = mapped_column(String, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    product_url: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (
-        Index("ix_observations_store_id", "store_id"),
-        Index("ix_observations_sku", "sku"),
-        Index("ix_observations_ts_utc", "ts_utc"),
+        Index("ix_observations_store_sku_ts", "store_id", "sku", "ts_utc"),
     )
 
 
@@ -66,9 +71,11 @@ class Alert(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    alert_type: Mapped[str] = mapped_column(String, nullable=False)
     store_id: Mapped[str] = mapped_column(String, nullable=False)
     sku: Mapped[str] = mapped_column(String, nullable=False)
-    rule: Mapped[str] = mapped_column(String, nullable=False)
-    old_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    new_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    delta: Mapped[float] = mapped_column(Float, nullable=False)
+    retailer: Mapped[str] = mapped_column(String, nullable=False)
+    pct_off: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)

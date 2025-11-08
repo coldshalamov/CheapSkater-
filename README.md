@@ -1,188 +1,68 @@
 # lowes-orwa-tracker
 
-## Project summary
-lowes-orwa-tracker is a store-scoped Lowe's clearance and price tracker focused on Oregon and Washington locations. It uses a DOM-first approach to read publicly visible product data without relying on hidden APIs.
-
-Pilot scope: **Lowe’s only** (Home Depot coming later).
-
-## Legal & ethics
-* Collect data only from publicly accessible pages.
-* Schedule requests at a polite frequency and monitor load to avoid stressing Lowe's infrastructure.
-* Review and comply with Lowe's website terms of service before running automated checks.
+Windows-first Lowe's tracker that scrapes public DOM pages with Playwright (Chromium), sets a store by ZIP, and records price/clearance data for a fixed catalog of building-material categories.
 
 ## Prerequisites (Windows)
-1. Download and install [Python 3.11](https://www.python.org/downloads/release/python-3110/).
-2. During installation, select **Add Python to PATH**.
+1. Install **Python 3.12 (64-bit)** via the Microsoft Store or python.org (enable “Add python.exe to PATH” or use the `py` launcher).
+2. Install Microsoft Edge or Google Chrome (Playwright downloads Chromium behind the scenes).
+3. Clone this repo and open **PowerShell** in the project root.
 
 ## Quick start
-Open **Windows PowerShell** in the project directory and run:
-
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 python -m playwright install
-```
-
-## Run once
-Run a single collection pass to confirm everything is wired correctly:
-
-```powershell
+python -m app.main --probe --zip 98101 --categories drywall
 python -m app.main --once
 ```
+- `--probe` sets the store, loads the requested category, and prints how many cards/titles/prices were detected. It fails fast if selectors drift.
+- `--once` runs the entire loop (all ZIPs + catalog URLs) one time. A successful cycle prints:
+  ```
+  cycle ok | retailer=lowes | zips={N} | items={M} | alerts={K} | duration={XX}s
+  ```
+- `python -m app.main` enters the scheduled loop (default every 180 minutes via APScheduler).
 
-## Paste selectors & category URLs (first run)
-1. In a normal browser, set the Lowe’s store by ZIP.
-2. Navigate to the **Flooring** category; copy the full URL and paste into `app/config.yml` under Flooring.
-3. Do the same for **Electrical**.
-4. In `app/selectors.py`, paste real CSS/XPath for `CARD, TITLE, PRICE, WAS_PRICE, AVAIL, IMG, LINK, NEXT_BTN, STORE_BADGE`.
-5. Run `python -m app.main --once` and verify the summary line.
+## Task Scheduler
+1. **Task Scheduler → Create Task…**  
+2. **Triggers** → **On a schedule** → Daily → Repeat every **3 hours** (for 1 day) → Enabled.  
+3. **Actions** → **New…**  
+   - Program/script: `C:\path\to\repo\.venv\Scripts\python.exe`  
+   - Add arguments: `-m app.main`  
+   - Start in: `C:\path\to\repo`  
+4. Check **Run whether user is logged on or not**, save, then **Run** to test.
 
-## Run continuously on Windows (Task Scheduler)
-1. Open **Task Scheduler** → **Create Task...**.
-2. **Triggers** → **On a schedule** → **Daily** → **Repeat task every 3 hours** (for **1 day**) → Enabled.
-3. **Actions** → **New...**, then set:
-   - Task Scheduler
-   - **Action**: Start a program
-   - **Program/script**: `C:\path\to\repo\.venv\Scripts\python.exe`
-   - `-m app.main` (arguments)
-   - **Start in (optional)**: `C:\path\to\repo`
-4. Click **OK** (recommended: enable **Run whether user is logged on or not**).
+## Configuration
+- `app/config.yml` — retailer toggle, ZIP list, scrape cadence, alert thresholds, output paths, and healthcheck URL. It also points at the catalog file.
+- `catalog/building_materials.lowes.yml` — the single source of category URLs (Drywall, Roofing, Decking, Last Chance, etc.). Edit this file to add/remove URLs; no code changes required.
+- `app/selectors.py` — the only place CSS selectors live. Update these constants if Lowe’s changes markup.
+- `.env` (copy from `.env.example`) — Telegram/SendGrid credentials plus optional overrides like `LOG_LEVEL`, `HTTP_PROXY`, or a custom User-Agent. If no transport is configured, alerts are logged only.
 
-## Configuration & environment
-* `app/config.yml` — primary application configuration (store list, scrape intervals, output preferences).
-* `.env` — sensitive credentials such as Telegram bot token and chat ID, or SendGrid API key and sender address.
+## What each run does
+1. For every ZIP in config, Playwright opens lowes.com, sets the store, and logs `store=<name> zip=<zip>`.
+2. Each catalog URL is visited with polite waits and either pagination clicks or infinite scroll. If a page renders zero product cards, a `SelectorChangedError` is raised for that category but other pages continue.
+3. Every card supplies: `sku`, `title`, `category`, `price`, `price_was`, `pct_off`, `availability`, `image_url`, `product_url`, `store_id`, `store_name`, `zip`, and `clearance` (badge keywords or `% off >= alerts.pct_drop`).
+4. Observations and Alerts are appended to SQLite (`orwa_lowes.sqlite`). The denormalised latest snapshot is rewritten to `outputs/orwa_items.csv` each cycle with these exact columns:  
+   `ts_utc, retailer, store_id, store_name, zip, sku, title, category, price, price_was, pct_off, availability, product_url, image_url`
+5. Logs go to both console and `logs/app.log`. The summary line above is always printed. If `healthcheck_url` is non-empty, the scraper performs a `GET` after a successful cycle.
 
-## Run modes
-* **Single run**: `python -m app.main --once`
-* **Continuous loop**: `python -m app.main`
+## CLI switches
+- `--once` — run a single cycle.
+- `--probe` — quick markup sanity check (requires `--zip` and `--categories` filter).
+- `--zip 98101,97204` — override the ZIP list (comma separated).
+- `--categories "roof|insulation"` — regex/substring filter applied to catalog names (case-insensitive).
 
-## Windows Task Scheduler (high-level preview)
-1. Create a basic task and set the trigger you need.
-2. Use the virtual environment interpreter directly, for example:
-   `C:\path\to\lowes-orwa-tracker\.venv\Scripts\python.exe -m app.main`
-3. Configure the working directory to the project root and finish the wizard. (Detailed steps will be documented later.)
+## Alerts
+Alerts fire when:
+1. Clearance flips from False/None to True for a `(store_id, sku)` pair.
+2. The new price is less than or equal to `last_price * (1 - alerts.pct_drop)`.
 
-## Outputs
-* CSV exports under `/outputs/`.
-* SQLite database file stored alongside other artifacts.
-* Rotating log files written to `/logs/`.
-
-## First-run expectations
-The first execution should produce CSV rows, populate the SQLite database, and write at least one summary line in the logs.
-
-## Troubleshooting teaser
-Upcoming documentation will cover adjusting Playwright selectors when Lowe's changes page structure and tuning store context lists when coverage gaps appear.
-
----
-
-## Example app/config.yml
-```yaml
-region: OR-WA
-stores:
-  - id: 1234
-    label: Beaverton-OR
-  - id: 5678
-    label: Vancouver-WA
-crawl:
-  cadence_minutes: 20
-  max_concurrency: 2
-  per_store_delay_s: "5-9"  # randomized range
-selectors:
-  price: "span[data-testid='price']"
-  clearance_badge: "div:has-text('Clearance')"
-notifications:
-  telegram_chat_id: null
-  sendgrid_to: null
-logging:
-  level: INFO
-  rotate_mb: 10
-  keep: 7
-```
-
-## Data outputs
-### CSV columns
-`timestamp_iso`, `store_id`, `store_label`, `product_sku`, `product_url`, `title`, `price_current`, `price_was`, `clearance_flag`, `in_stock`, `aisle_bay`, `fetch_status`
-
-### SQLite indices
-- `UNIQUE(store_id, product_sku, timestamp)`
-- `INDEX(product_sku, timestamp)`
-- `INDEX(store_id, timestamp)`
-
-## Hardening & Politeness
-- Retries: per-item exponential backoff with jitter to keep a never-fails posture for the main loop.
-- Randomized delays: 3–7 second baseline plus the configured `per_store_delay_s` window to avoid bursty load.
-- Robots & ToS: honor robots.txt directives and keep concurrency bounded to respect the site.
-- User-Agent: `lowes-orwa-tracker/1.0 (contact: you@example.com)` for transparent identification.
-- Scope: no login flows, CAPTCHA bypassing, or hidden APIs—only DOM-first reads of public pages.
-
-## macOS/Linux quick start
-Open a terminal in the project directory and run:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m playwright install
-python -m app.main
-```
-
-## Windows Task Scheduler (exact settings)
-When configuring the action step of a scheduled task, set:
-
-- **Program/script**: `C:\path\to\lowes-orwa-tracker\.venv\Scripts\python.exe`
-- **Add arguments**: `-m app.main`
-- **Start in (IMPORTANT)**: `C:\path\to\lowes-orwa-tracker`
-
-### Detailed configuration checklist
-
-- **Where to click**: Create Basic Task.
-- **Trigger**: Daily; Repeat every **3 hours** for a duration of **1 day**; Enabled.
-- **Action**:
-  - **Program/script**: `C:\path\to\lowes-orwa-tracker\.venv\Scripts\python.exe`
-  - **Add arguments**: `-m app.main`
-  - **Start in**: `C:\path\to\lowes-orwa-tracker`
-- **Options**: Check **Run whether user is logged on or not**.
-- **Test**: After saving, right-click the task and choose **Run**.
-
-## Paste your selectors (checklist)
-- [ ] `CARD`
-- [ ] `TITLE`
-- [ ] `PRICE`
-- [ ] `WAS_PRICE`
-- [ ] `AVAIL`
-- [ ] `IMG`
-- [ ] `LINK`
-- [ ] `NEXT_BTN`
-- [ ] `STORE_BADGE`
-
-Reminder: set your store by ZIP inside Chrome first, then use **Copy → Copy selector** for each element before updating `app/selectors.py`.
-
-## First run checklist
-- Create a Telegram bot or obtain a SendGrid API key.
-- Populate `.env` with Telegram/SendGrid credentials plus optional `LOG_LEVEL`, `USER_AGENT`, and `HTTP_PROXY`.
-- Add ZIP codes and category URLs to `app/config.yml`.
-- Paste your CSS selectors into `app/selectors.py`.
-- `pip install -r requirements.txt`
-- `python -m playwright install`
-- Test a single pass with `python -m app.main --once`
-
-## Fail-fast errors
-| Code | Meaning / How to fix |
-|------|----------------------|
-| CONFIG_CATEGORY_URLS_REQUIRED | Paste real category URLs into `app/config.yml` (Flooring/Electrical) after setting store. |
-| SELECTORS_NOT_CONFIGURED | Fill the required CSS in `app/selectors.py` (`CARD`, `TITLE`, `PRICE`, `LINK`, `STORE_BADGE`, etc.). |
-
-> Pilot scope: **Lowe’s only**. The Home Depot adapter is intentionally disabled.
+If Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) or SendGrid (`SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_TO`) credentials are present, alerts are sent; otherwise they remain in the SQLite `alerts` table and the logs.
 
 ## Troubleshooting
-- **Store not set** → Fix `STORE_BADGE`; manually confirm you can change stores in the browser.
-- **Zero cards captured** → Update `CARD`; verify the category URL still renders results after setting the store.
-- **Prices returning `None`** → Double-check `PRICE` and `WAS_PRICE`; the regex already supports `$` and commas.
-- **Alerts not sending** → Confirm `.env` values and try a Telegram notification before switching providers.
+- **Selector drift** → run `python -m app.main --probe --zip 98101 --categories flooring` to confirm the failure and adjust `app/selectors.py`.
+- **Store context fails** → ensure the Lowe’s site allows you to change stores manually and that the `STORE_BADGE` selector still matches the header badge.
+- **Zero cards scraped** → validate the category URL in `catalog/building_materials.lowes.yml` still renders products for the selected store.
+- **Playwright missing browsers** → rerun `python -m playwright install` inside the virtual environment.
 
-## Scaling notes
-- Queue jobs for additional stores.
-- Store observations in Postgres for concurrency-safe writes.
-- Run parallel workers behind optional proxies.
-- Point a Metabase dashboard at the warehouse for monitoring.
+The program is intentionally boring: one catalog file, one selector module, one orchestration loop. Keep those three sources of truth up to date and the rest runs on rails.

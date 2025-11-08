@@ -1,13 +1,11 @@
 # After installing dependencies, run: python -m playwright install
-playwright==1.44.0
-pydantic==2.7.1
-pyyaml==6.0.1
-python-dotenv==1.0.1
-sqlalchemy==2.0.29
-apscheduler==3.10.4
-requests==2.31.0
-tenacity==8.2.3
-beautifulsoup4==4.12.3
-lxml==5.1.0
-typing-extensions==4.11.0
-pytest==8.2.2
+playwright>=1.45.0
+pydantic>=2.8.2
+pydantic-core>=2.20.1
+pyyaml>=6.0.1
+python-dotenv>=1.0.1
+sqlalchemy>=2.0.31
+apscheduler>=3.10.4
+requests>=2.32.3
+tenacity>=8.3.0
+beautifulsoup4>=4.12.3
