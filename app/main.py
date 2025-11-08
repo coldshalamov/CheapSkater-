@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import datetime, timezone
+import os
 from pathlib import Path
+from urllib.parse import urlparse
 import re
 import time
 from typing import Any, Iterable
@@ -64,16 +66,17 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Set store context, load one category, and exit after reporting card counts.",
     )
     parser.add_argument(
-        "--retailer",
-        default="lowes",
-        help="Retailer to target (only 'lowes' is supported).",
-    )
-    parser.add_argument(
         "--zip",
         "--zips",
         dest="zips",
         type=str,
         help="Comma-separated list of ZIP codes to override configuration values.",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of ZIP codes to process concurrently (default: 1).",
     )
     parser.add_argument(
         "--categories",
@@ -84,10 +87,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    retailer_value = (args.retailer or "").strip().lower()
-    if retailer_value and retailer_value != "lowes":
-        parser.error("Only 'lowes' is supported in pilot. Home Depot is not yet implemented.")
-    args.retailer = retailer_value or "lowes"
+    if args.concurrency is None or args.concurrency <= 0:
+        parser.error("--concurrency must be a positive integer")
 
     zip_arg = args.zips or ""
     args.zips = [zip_code.strip() for zip_code in zip_arg.split(",") if zip_code.strip()]
@@ -257,59 +258,103 @@ async def _run_cycle(
 
     try:
         async with async_playwright() as playwright:
-            for zip_code in zips:
+            browser = await playwright.chromium.launch(headless=True)
+
+            semaphore = asyncio.Semaphore(args.concurrency or 1)
+
+            async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
+                async with semaphore:
+                    zip_extra = {"zip": zip_code}
+                    try:
+                        rows = await run_for_zip(
+                            playwright,
+                            zip_code,
+                            categories,
+                            clearance_threshold=pct_threshold,
+                            browser=browser,
+                        )
+                    except StoreContextError as exc:
+                        LOGGER.error(
+                            "Unable to set store for ZIP %s: %s",
+                            zip_code,
+                            exc,
+                            extra=zip_extra,
+                        )
+                        return 0, 0, False
+                    except SelectorChangedError as exc:
+                        extra = {
+                            "zip": zip_code,
+                            "category": getattr(exc, "category", None),
+                            "url": getattr(exc, "url", None),
+                        }
+                        LOGGER.warning(
+                            "No products parsed for ZIP %s (category=%s url=%s): %s",
+                            zip_code,
+                            extra["category"] or "unknown",
+                            extra["url"] or "unknown",
+                            exc,
+                            extra=extra,
+                        )
+                        return 0, 0, False
+                    except PageLoadError as exc:
+                        extra = {
+                            "zip": zip_code,
+                            "category": getattr(exc, "category", None),
+                            "url": getattr(exc, "url", None),
+                        }
+                        LOGGER.warning(
+                            "Page load error for ZIP %s (category=%s url=%s): %s",
+                            zip_code,
+                            extra["category"] or "unknown",
+                            extra["url"] or "unknown",
+                            exc,
+                            extra=extra,
+                        )
+                        return 0, 0, False
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.exception(
+                            "Unexpected failure scraping ZIP %s: %s",
+                            zip_code,
+                            exc,
+                            extra=zip_extra,
+                        )
+                        return 0, 0, False
+
+                    if not rows:
+                        LOGGER.info(
+                            "Scrape returned no rows for ZIP %s; continuing",
+                            zip_code,
+                            extra=zip_extra,
+                        )
+                        return 0, 0, True
+
+                    items = 0
+                    alerts = 0
+                    for row in rows:
+                        processed = await _process_row(
+                            row,
+                            zip_code,
+                            session_factory,
+                            notifier,
+                            pct_threshold,
+                        )
+                        items += processed[0]
+                        alerts += processed[1]
+                    return items, alerts, True
+
+            try:
+                results = await asyncio.gather(
+                    *(_process_zip(zip_code) for zip_code in zips)
+                )
+                for items, alerts, success in results:
+                    total_items += items
+                    total_alerts += alerts
+                    any_zip_success = any_zip_success or success
+            finally:
                 try:
-                    rows = await run_for_zip(
-                        playwright,
-                        zip_code,
-                        categories,
-                        clearance_threshold=pct_threshold,
-                    )
-                except StoreContextError as exc:
-                    LOGGER.error("Unable to set store for ZIP %s: %s", zip_code, exc)
-                    continue
-                except SelectorChangedError as exc:
-                    LOGGER.warning(
-                        "No products parsed for ZIP %s (category=%s url=%s): %s",
-                        zip_code,
-                        getattr(exc, "category", "unknown"),
-                        getattr(exc, "url", "unknown"),
-                        exc,
-                    )
-                    continue
-                except PageLoadError as exc:
-                    LOGGER.warning(
-                        "Page load error for ZIP %s (category=%s url=%s): %s",
-                        zip_code,
-                        getattr(exc, "category", "unknown"),
-                        getattr(exc, "url", "unknown"),
-                        exc,
-                    )
-                    continue
+                    await browser.close()
                 except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.exception(
-                        "Unexpected failure scraping ZIP %s: %s", zip_code, exc
-                    )
-                    continue
-
-                any_zip_success = True
-
-                if not rows:
-                    LOGGER.info(
-                        "Scrape returned no rows for ZIP %s; continuing", zip_code
-                    )
-                    continue
-
-                for row in rows:
-                    processed = await _process_row(
-                        row,
-                        zip_code,
-                        session_factory,
-                        notifier,
-                        pct_threshold,
-                    )
-                    total_items += processed[0]
-                    total_alerts += processed[1]
+                    LOGGER.warning("Failed to close shared browser: %s", exc)
     finally:
         duration = time.monotonic() - start
 
@@ -350,19 +395,22 @@ async def _run_probe(
     category_url = target_category["url"]
 
     async with async_playwright() as playwright:
+        user_agent = (os.getenv("USER_AGENT") or "").strip() or None
         browser = await playwright.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            user_agent="lowes-orwa-tracker/1.0 (contact: you@example.com)",
-            storage_state=None,
-        )
+        context_kwargs: dict[str, Any] = {
+            "viewport": {"width": 1440, "height": 900},
+            "storage_state": None,
+        }
+        if user_agent:
+            context_kwargs["user_agent"] = user_agent
+        context = await browser.new_context(**context_kwargs)
         page = await context.new_page()
 
         try:
             card_count = 0
             title_count = 0
             price_count = 0
-            await set_store_context(page, target_zip)
+            await set_store_context(page, target_zip, user_agent=user_agent)
             await page.goto(category_url, wait_until="domcontentloaded")
             await page.wait_for_load_state("networkidle")
             await human_wait()
@@ -407,12 +455,20 @@ async def _run_probe(
         finally:
             try:
                 await context.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to close probe context: %s",
+                    exc,
+                    extra={"zip": target_zip},
+                )
             try:
                 await browser.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to close probe browser: %s",
+                    exc,
+                    extra={"zip": target_zip},
+                )
 
     print(
         "probe ok | zip={zip} | category={category} | cards={cards} | titles={titles} | prices={prices}".format(
@@ -458,8 +514,15 @@ async def _process_row(
     if isinstance(image_url, str):
         image_url = image_url.strip() or None
 
-    if not title or not sku or not product_url:
-        LOGGER.debug("Skipping row with insufficient data (sku=%s title=%s)", sku, title)
+    canonical_sku = sku or product_url
+
+    if not title or not product_url or not canonical_sku:
+        LOGGER.debug(
+            "Skipping row with insufficient data (sku=%s title=%s)",
+            canonical_sku,
+            title,
+            extra={"zip": zip_code, "category": category, "url": product_url},
+        )
         return 0, 0
 
     store_id_raw = (row.get("store_id") or "").strip()
@@ -514,10 +577,10 @@ async def _process_row(
                 city=_derive_city_from_store_name(store_name),
                 state=_infer_state_from_zip(store_zip),
             )
-            last_obs = repo.get_last_observation(session, store_id, sku)
+            last_obs = repo.get_last_observation(session, store_id, sku, product_url)
             repo.upsert_item(
                 session,
-                sku,
+                canonical_sku,
                 "lowes",
                 title,
                 category,
@@ -527,7 +590,7 @@ async def _process_row(
             obs_model = Observation(
                 ts_utc=ts_now,
                 store_id=store_id,
-                sku=sku,
+                sku=canonical_sku,
                 retailer="lowes",
                 store_name=store_name,
                 zip=store_zip,
@@ -552,7 +615,7 @@ async def _process_row(
                     ts_utc=ts_now,
                     alert_type="new_clearance",
                     store_id=store_id,
-                    sku=sku,
+                    sku=canonical_sku,
                     retailer="lowes",
                     pct_off=obs_model.pct_off,
                     price=obs_model.price,
@@ -564,7 +627,12 @@ async def _process_row(
                 try:
                     notifier.notify_new_clearance(obs_model)
                 except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.error("Notifier failed for clearance (sku=%s): %s", sku, exc)
+                    LOGGER.error(
+                        "Notifier failed for clearance (sku=%s): %s",
+                        canonical_sku,
+                        exc,
+                        extra={"zip": zip_code, "category": category, "url": product_url},
+                    )
                 alerts_created += 1
 
             if price_drop and last_obs is not None:
@@ -580,7 +648,7 @@ async def _process_row(
                     ts_utc=ts_now,
                     alert_type="price_drop",
                     store_id=store_id,
-                    sku=sku,
+                    sku=canonical_sku,
                     retailer="lowes",
                     pct_off=drop_pct,
                     price=obs_model.price,
@@ -592,10 +660,20 @@ async def _process_row(
                 try:
                     notifier.notify_price_drop(obs_model, last_obs)
                 except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.error("Notifier failed for price drop (sku=%s): %s", sku, exc)
+                    LOGGER.error(
+                        "Notifier failed for price drop (sku=%s): %s",
+                        canonical_sku,
+                        exc,
+                        extra={"zip": zip_code, "category": category, "url": product_url},
+                    )
                 alerts_created += 1
     except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.exception("Failed to persist row for sku=%s: %s", sku, exc)
+        LOGGER.exception(
+            "Failed to persist row for sku=%s: %s",
+            canonical_sku,
+            exc,
+            extra={"zip": zip_code, "category": category, "url": product_url},
+        )
         return 0, 0
 
     return 1, alerts_created
@@ -622,29 +700,37 @@ def _export_csv(config: dict[str, Any], session_factory) -> None:
 def _ping_healthcheck(config: dict[str, Any]) -> None:
     url = (config or {}).get("healthcheck_url")
     if not url:
+        LOGGER.info("healthcheck: disabled")
         return
+    host = urlparse(str(url)).netloc or urlparse(str(url)).path
     try:
         response = requests.get(url, timeout=5)
     except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.warning("Healthcheck ping failed: %s", exc)
+        LOGGER.warning("Healthcheck ping failed for host=%s: %s", host, exc)
         return
     if response.status_code >= 400:
         LOGGER.warning(
-            "Healthcheck returned status %s: %s",
+            "Healthcheck returned status %s for host=%s",
             response.status_code,
-            response.text,
+            host,
+        )
+    else:
+        LOGGER.info(
+            "healthcheck ok | host=%s status=%s",
+            host,
+            response.status_code,
         )
 
 
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
     LOGGER.info(
-        "Parsed arguments: once=%s probe=%s discover_categories=%s discover_stores=%s retailer=%s zips=%s categories_pattern=%s",
+        "Parsed arguments: once=%s probe=%s discover_categories=%s discover_stores=%s concurrency=%s zips=%s categories_pattern=%s",
         args.once,
         args.probe,
         args.discover_categories,
         args.discover_stores,
-        args.retailer,
+        args.concurrency,
         args.zips,
         getattr(args, "categories_pattern", None).pattern  # type: ignore[attr-defined]
         if getattr(args, "categories_pattern", None)

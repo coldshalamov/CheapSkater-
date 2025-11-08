@@ -90,13 +90,21 @@ def insert_observation(session: Session, obs: Observation) -> Observation:
     return obs
 
 
-def get_last_observation(session: Session, store_id: str, sku: str) -> Observation | None:
-    stmt = (
-        select(Observation)
-        .where(Observation.store_id == store_id, Observation.sku == sku)
-        .order_by(Observation.ts_utc.desc())
-        .limit(1)
-    )
+def get_last_observation(
+    session: Session,
+    store_id: str,
+    sku: str | None,
+    product_url: str | None,
+) -> Observation | None:
+    stmt = select(Observation).where(Observation.store_id == store_id)
+    if sku:
+        stmt = stmt.where(Observation.sku == sku)
+    elif product_url:
+        stmt = stmt.where(Observation.product_url == product_url)
+    else:
+        return None
+
+    stmt = stmt.order_by(Observation.ts_utc.desc()).limit(1)
     return session.execute(stmt).scalar_one_or_none()
 
 
@@ -129,8 +137,9 @@ def should_alert_price_drop(
 
 
 def flatten_for_csv(session: Session) -> list[dict[str, object]]:
+    key_value = func.coalesce(Observation.sku, Observation.product_url)
     row_number = func.row_number().over(
-        partition_by=(Observation.store_id, Observation.sku),
+        partition_by=(Observation.store_id, key_value),
         order_by=Observation.ts_utc.desc(),
     )
 
@@ -204,11 +213,18 @@ def write_csv(rows: Iterable[dict[str, object]], csv_path: str) -> None:
     path = Path(csv_path)
     os.makedirs(path.parent, exist_ok=True)
 
-    with path.open("w", newline="", encoding="utf-8") as handle:
+    tmp_path = Path(f"{path}.tmp")
+    os.makedirs(tmp_path.parent, exist_ok=True)
+
+    with tmp_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(CSV_HEADER)
         for row in rows:
             writer.writerow(_row_to_values(row))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+    os.replace(tmp_path, path)
 
 
 def _row_to_values(row: dict[str, object]) -> list[str]:

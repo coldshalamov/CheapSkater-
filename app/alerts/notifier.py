@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import html
 import os
+import time
 from typing import Iterable
 
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.logging_config import get_logger
 from app.storage.models_sql import Observation
@@ -23,6 +25,7 @@ class Notifier:
         self._sendgrid_key = os.getenv("SENDGRID_API_KEY")
         self._sendgrid_to = os.getenv("SENDGRID_TO")
         self._sendgrid_from = os.getenv("SENDGRID_FROM")
+        self._last_send = 0.0
 
     def notify_new_clearance(self, obs: Observation) -> None:
         """Send a clearance alert when transport is configured."""
@@ -65,28 +68,41 @@ class Notifier:
         return lines
 
     def _dispatch(self, subject: str, lines: list[str]) -> None:
-        if self._telegram_token and self._telegram_chat:
-            self._send_telegram(lines)
-        elif self._sendgrid_key and self._sendgrid_to and self._sendgrid_from:
-            self._send_sendgrid(subject, lines)
-        else:
-            LOGGER.debug("Alert (noop): %s", " | ".join(lines))
+        transport = None
+        try:
+            if self._telegram_token and self._telegram_chat:
+                transport = "telegram"
+                self._send_telegram(lines)
+            elif self._sendgrid_key and self._sendgrid_to and self._sendgrid_from:
+                transport = "sendgrid"
+                self._send_sendgrid(subject, lines)
+            else:
+                LOGGER.debug("Alert (noop): %s", " | ".join(lines))
+        except Exception as exc:  # pragma: no cover - defensive retries exhausted
+            LOGGER.warning("Alert delivery failed via %s: %s", transport, exc)
 
+    def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_send
+        if elapsed < 1:
+            time.sleep(1 - elapsed)
+        self._last_send = time.monotonic()
+
+    @retry(wait=wait_exponential(multiplier=0.5, max=10), stop=stop_after_attempt(5), reraise=True)
     def _send_telegram(self, lines: Iterable[str]) -> None:
+        self._throttle()
         url = f"https://api.telegram.org/bot{self._telegram_token}/sendMessage"
         payload = {
             "chat_id": self._telegram_chat,
             "text": "\n".join(lines),
             "disable_web_page_preview": True,
         }
-        try:
-            response = requests.post(url, json=payload, timeout=8)
-            if response.status_code >= 400:
-                LOGGER.warning("Telegram responded with %s: %s", response.status_code, response.text)
-        except Exception as exc:  # pragma: no cover - network failures
-            LOGGER.error("Failed to send Telegram alert: %s", exc)
+        response = requests.post(url, json=payload, timeout=8)
+        if response.status_code >= 400:
+            raise RuntimeError(f"HTTP {response.status_code}")
 
+    @retry(wait=wait_exponential(multiplier=0.5, max=10), stop=stop_after_attempt(5), reraise=True)
     def _send_sendgrid(self, subject: str, lines: list[str]) -> None:
+        self._throttle()
         body = "".join(f"<p>{html.escape(line)}</p>" for line in lines[:-1])
         link = html.escape(lines[-1])
         body += f"<p><a href=\"{link}\">{link}</a></p>"
@@ -96,12 +112,14 @@ class Notifier:
             "content": [{"type": "text/html", "value": body}],
         }
         headers = {"Authorization": f"Bearer {self._sendgrid_key}"}
-        try:
-            response = requests.post("https://api.sendgrid.com/v3/mail/send", json=payload, headers=headers, timeout=8)
-            if response.status_code >= 300:
-                LOGGER.warning("SendGrid responded with %s: %s", response.status_code, response.text)
-        except Exception as exc:  # pragma: no cover - network failures
-            LOGGER.error("Failed to send SendGrid alert: %s", exc)
+        response = requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            json=payload,
+            headers=headers,
+            timeout=8,
+        )
+        if response.status_code >= 300:
+            raise RuntimeError(f"HTTP {response.status_code}")
 
     @staticmethod
     def _format_price(value: float | None) -> str | None:
