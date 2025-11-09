@@ -247,6 +247,13 @@ async def _run_cycle(
         return total_items, total_alerts
 
     pct_threshold = _get_pct_threshold(config)
+    abs_map_raw = (config.get("alerts") or {}).get("abs_thresholds") or {}
+    if isinstance(abs_map_raw, dict):
+        abs_map = {
+            (key or "").strip().lower(): value for key, value in abs_map_raw.items()
+        }
+    else:
+        abs_map = {}
 
     LOGGER.info(
         "Starting run cycle | retailer=lowes | zips=%d | categories=%d",
@@ -337,6 +344,7 @@ async def _run_cycle(
                             session_factory,
                             notifier,
                             pct_threshold,
+                            abs_map,
                         )
                         items += processed[0]
                         alerts += processed[1]
@@ -487,6 +495,7 @@ async def _process_row(
     session_factory,
     notifier: Notifier,
     pct_threshold: float,
+    abs_map: dict[str, Any],
 ) -> tuple[int, int]:
     def _coerce_price(value: Any) -> float | None:
         if value is None:
@@ -616,7 +625,31 @@ async def _process_row(
             session.commit()
 
             new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
+            triggered: list[str] = []
             price_drop = repo.should_alert_price_drop(last_obs, obs_model, pct_threshold)
+            if price_drop:
+                triggered.append(f"pct>={pct_threshold:.2f}")
+
+            # Absolute-drop logic (category-specific or default)
+            abs_key = (category or "").strip().lower()
+            abs_th = abs_map.get(abs_key, abs_map.get("default"))
+            if abs_th and (
+                last_obs
+                and last_obs.price is not None
+                and obs_model.price is not None
+            ):
+                try:
+                    if (last_obs.price - obs_model.price) >= float(abs_th):
+                        triggered.append(f"abs>={abs_th}")
+                        price_drop = True
+                except Exception:
+                    pass
+
+            LOGGER.debug(
+                "alert check sku=%s rules=%s",
+                canonical_sku,
+                ",".join(triggered),
+            )
 
             if new_clearance:
                 alert = Alert(

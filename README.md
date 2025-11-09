@@ -70,6 +70,7 @@ python -m app.main --once
 Alerts fire when:
 1. Clearance flips from False/None to True for a `(store_id, sku)` pair.
 2. The new price is less than or equal to `last_price * (1 - alerts.pct_drop)`.
+3. (Optional) If `alerts.abs_thresholds` is set in `app/config.yml`, a drop of at least that amount (either the `default` or a category-specific override) will also trigger an alert.
 
 If Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) or SendGrid (`SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_TO`) credentials are present, alerts are sent with exponential backoff retries and a 1 msg/sec rate limit; otherwise they remain in the SQLite `alerts` table and the logs.
 
