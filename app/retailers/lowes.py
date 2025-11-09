@@ -56,6 +56,7 @@ def _ensure_selectors_configured() -> None:
         for name in required
         if not getattr(selectors, name, "").strip()
         or "TODO" in getattr(selectors, name, "").upper()
+        or "..." in getattr(selectors, name, "")
     ]
     if missing:
         raise SelectorChangedError(
