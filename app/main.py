@@ -217,12 +217,12 @@ def _infer_state_from_zip(zip_code: str | None) -> str:
 def _derive_city_from_store_name(store_name: str | None) -> str:
     if not store_name:
         return "Unknown"
-    parts = re.split(r"[-–|,]", store_name)
-    for part in parts:
-        cleaned = part.strip()
-        if cleaned:
-            return cleaned
-    return store_name.strip() or "Unknown"
+    name = store_name.strip()
+    name = re.sub(r"(?i)^l?.?owe'?s(\s+of)?\s*", "", name)
+    tokens = [t.strip() for t in re.split(r"[-–|,]", name) if t.strip()]
+    if tokens:
+        return tokens[-1]
+    return name or "Unknown"
 
 
 async def _run_cycle(
@@ -492,9 +492,17 @@ async def _process_row(
         if value is None:
             return None
         if isinstance(value, (int, float)):
-            return float(value)
+            v = float(value)
+            if v < 0 or v > 100_000:
+                return None
+            return v
         if isinstance(value, str):
-            return schemas.parse_price(value)
+            v = schemas.parse_price(value)
+            if v is None:
+                return None
+            if v < 0 or v > 100_000:
+                return None
+            return v
         return None
 
     def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
@@ -703,8 +711,10 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
         LOGGER.info("healthcheck: disabled")
         return
     host = urlparse(str(url)).netloc or urlparse(str(url)).path
+    verify_env = os.getenv("HEALTHCHECK_VERIFY")
+    verify = True if verify_env is None else verify_env.strip().lower() not in {"0", "false", "no"}
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=5, verify=verify)
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("Healthcheck ping failed for host=%s: %s", host, exc)
         return
