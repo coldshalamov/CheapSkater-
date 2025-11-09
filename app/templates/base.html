@@ -4,21 +4,27 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}CheapSkater Dashboard{% endblock %}</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <header>
-        <h1><a href="/">CheapSkater Clearance Dashboard</a></h1>
-        <nav>
-            <a href="/">All Clearance</a>
-            <a href="/new-today">New Today</a>
+    <header class="site-header">
+        <div class="brand">
+            <a href="/">
+                <span class="brand-name">CheapSkater</span>
+                <span class="brand-tagline">Lowe's Clearance Insights</span>
+            </a>
+        </div>
+        <nav class="nav-links" aria-label="Primary navigation">
+            <a href="/" class="nav-link">All Clearance</a>
+            <a href="/new-today" class="nav-link">New Today</a>
         </nav>
     </header>
-    <main>
+    <main class="site-main">
         {% block content %}{% endblock %}
     </main>
-    <footer>
-        <p>Data sourced from Lowe's clearance observations.</p>
+    <footer class="site-footer">
+        <p>Updated with the latest Lowe's clearance findings.</p>
     </footer>
 </body>
 </html>

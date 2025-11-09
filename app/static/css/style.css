@@ -1,0 +1,344 @@
+:root {
+    --lowes-blue: #004990;
+    --lowes-blue-light: #e6edf7;
+    --lowes-blue-dark: #003366;
+    --accent-green: #1b8a3b;
+    --accent-red: #c62828;
+    --text-muted: #6c7a89;
+    --surface: #ffffff;
+    --surface-muted: #f7f9fc;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    background-color: var(--surface-muted);
+    color: #2c3e50;
+    line-height: 1.5;
+}
+
+a {
+    color: inherit;
+}
+
+a:hover,
+a:focus {
+    color: inherit;
+}
+
+.site-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem clamp(1rem, 4vw, 3rem);
+    background: linear-gradient(135deg, var(--lowes-blue), var(--lowes-blue-dark));
+    color: #ffffff;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+}
+
+.brand a {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+    gap: 0.25rem;
+}
+
+.brand-name {
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.brand-tagline {
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.nav-links {
+    display: inline-flex;
+    gap: 0.75rem;
+    background: rgba(255, 255, 255, 0.12);
+    padding: 0.35rem;
+    border-radius: 999px;
+}
+
+.nav-link {
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    text-decoration: none;
+    color: #ffffff;
+    font-weight: 600;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.nav-link:hover,
+.nav-link:focus,
+.nav-link[aria-current="page"] {
+    background-color: #ffffff;
+    color: var(--lowes-blue);
+}
+
+.site-main {
+    padding: clamp(1rem, 4vw, 3rem);
+}
+
+.site-footer {
+    text-align: center;
+    padding: 1.5rem clamp(1rem, 4vw, 3rem);
+    color: var(--text-muted);
+}
+
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.dashboard-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+}
+
+.tabs {
+    display: inline-flex;
+    background: var(--lowes-blue-light);
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 73, 144, 0.2);
+}
+
+.tabs .tab {
+    padding: 0.5rem 1.25rem;
+    font-weight: 600;
+    color: var(--lowes-blue);
+    text-decoration: none;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tabs .tab:hover,
+.tabs .tab:focus {
+    background: rgba(0, 73, 144, 0.15);
+}
+
+.tabs .tab.active {
+    background: var(--lowes-blue);
+    color: #ffffff;
+}
+
+.category-filter select {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(0, 73, 144, 0.3);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    min-width: 180px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.last-updated {
+    font-size: 0.9rem;
+    color: #4a4a4a;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.items-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.items-table th,
+.items-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #e1e8f0;
+}
+
+.items-table thead {
+    background: var(--lowes-blue);
+    color: #ffffff;
+}
+
+.items-table tbody tr:hover {
+    background: #f0f6ff;
+}
+
+.item-title a {
+    font-weight: 600;
+    color: var(--lowes-blue);
+    text-decoration: none;
+}
+
+.item-title a:hover,
+.item-title a:focus {
+    text-decoration: underline;
+}
+
+.item-category {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.thumbnail img {
+    border-radius: 8px;
+    object-fit: cover;
+    width: 50px;
+    height: 50px;
+}
+
+.thumbnail .placeholder {
+    width: 50px;
+    height: 50px;
+    display: grid;
+    place-items: center;
+    background: var(--lowes-blue-light);
+    color: var(--text-muted);
+    border-radius: 8px;
+    font-size: 0.75rem;
+}
+
+.price {
+    font-weight: 700;
+    color: var(--accent-red);
+}
+
+.was {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.pct-off {
+    font-weight: 700;
+    color: var(--accent-green);
+}
+
+.store {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.store .store-name {
+    font-weight: 600;
+}
+
+.store .zip {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.availability {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.no-results {
+    text-align: center;
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    padding: 2rem 0;
+}
+
+@media (max-width: 900px) {
+    .nav-links {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 768px) {
+    .site-header {
+        padding: 1.25rem 1rem;
+        text-align: center;
+    }
+
+    .brand a {
+        align-items: center;
+    }
+
+    .site-main {
+        padding: 1rem;
+    }
+
+    .dashboard {
+        padding: 1rem 0.75rem;
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .category-filter select {
+        width: 100%;
+    }
+
+    .items-table thead {
+        display: none;
+    }
+
+    .items-table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-bottom: 1px solid #d9e3f2;
+    }
+
+    .items-table tbody tr td {
+        border: none;
+        padding: 0;
+    }
+
+    .items-table tbody tr td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+    }
+
+    .items-table tbody tr td.price,
+    .items-table tbody tr td.was,
+    .items-table tbody tr td.pct-off,
+    .items-table tbody tr td.store,
+    .items-table tbody tr td.availability {
+        font-size: 0.95rem;
+    }
+}
