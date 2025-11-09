@@ -31,7 +31,10 @@ CLEARANCE_RE = re.compile(
 )
 
 _SKU_PATTERNS = (
-    re.compile(r"/pd/(?:[^/]*-)?(\d{4,})", re.I),
+    re.compile(
+        rf"{re.escape(selectors.PRODUCT_PATH_FRAGMENT)}(?:[^/]*-)?(\d{{4,}})",
+        re.I,
+    ),
     re.compile(r"/product/[^/]+-(\d{4,})", re.I),
     re.compile(r"(\d{6,})(?:[/?]|$)"),
 )

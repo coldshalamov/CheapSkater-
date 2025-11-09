@@ -1,15 +1,16 @@
 """Centralised selectors for Lowe's scraping and discovery flows."""
 
 # ==== SCRAPE (product grid) ====
-CARD = "main :is(li,article,div):has(a[href*='/pd/'])"
-CARD_ALT = "section [data-test*='product'] a[href*='/pd/']"
-TITLE = ":scope a[href*='/pd/'], :scope h3, :scope h2"
+PRODUCT_PATH_FRAGMENT = "/pd/"
+CARD = f"main :is(li,article,div):has(a[href*='{PRODUCT_PATH_FRAGMENT}'])"
+CARD_ALT = f"section [data-test*='product'] a[href*='{PRODUCT_PATH_FRAGMENT}']"
+TITLE = f":scope a[href*='{PRODUCT_PATH_FRAGMENT}'], :scope h3, :scope h2"
 PRICE = ":scope :is([data-test*='price'], [data-automation-id*='price'], .price, .sale-price, .ProductPrice__price, [aria-label*='$'])"
 PRICE_ALT = ":scope [data-testid*='price'], :scope [aria-label^='$']"
 WAS_PRICE = ":scope :is([data-test*='was'], .was-price, .strike, [aria-label*='Was'])"
 AVAIL = ":scope :is([data-test*='availability'], [data-automation-id*='availability'], .availability, [aria-label*='stock'])"
 IMG = ":scope img"
-LINK = ":scope a[href*='/pd/']"
+LINK = f":scope a[href*='{PRODUCT_PATH_FRAGMENT}']"
 NEXT_BTN = "nav[aria-label='Pagination'] a[rel='next'], button[aria-label='Next'], .pagination-next a, .pagination button[aria-label='Next']"
 STORE_BADGE = "header :is([aria-label*='My Store'], [data-test*='store'], [data-automation-id*='store'], a[href*='store-details'])"
 
