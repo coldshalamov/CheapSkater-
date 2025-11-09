@@ -1,83 +1,102 @@
-# lowes-orwa-tracker
+# CheapSkater WA/OR Lowe's Clearance Tracker
 
-Windows-first Lowe's tracker that scrapes public DOM pages with Playwright (Chromium), sets a store by ZIP, and records price/clearance data for a fixed catalog of building-material categories.
+CheapSkater continuously scrapes every Lowe's store in Washington (ZIPs 980-994) and Oregon (ZIPs 970-979) for building-material clearance deals. The Playwright-driven backend writes observations to SQLite, publishes atomic CSV/Excel exports, and serves a responsive FastAPI dashboard at `http://localhost:8000`.
 
-## Prerequisites (Windows)
-1. Install **Python 3.12 (64-bit)** via the Microsoft Store or python.org (enable “Add python.exe to PATH” or use the `py` launcher).
-2. Install Microsoft Edge or Google Chrome (Playwright downloads Chromium behind the scenes).
-3. Clone this repo and open **PowerShell** in the project root.
+## Prerequisites
 
-## Quick start
-```powershell
+* Python 3.11+ (tested on Linux and Windows)
+* Node is **not** required—Playwright downloads Chromium automatically
+* SQLite is bundled with Python
+
+After cloning the repository run:
+
+```bash
 python -m venv .venv
-\.venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m playwright install
+python -m playwright install chromium
+```
 
-# One-time discovery of catalog URLs & WA/OR ZIPs
+## First-time discovery
+
+Generate the monitored catalog and ZIP list directly from lowes.com. Both commands only need to be run when you want to refresh the catalog or store list.
+
+```bash
 python -m app.main --discover-categories
 python -m app.main --discover-stores
-
-# Sanity-check the first catalog entry at one store (uses the discovered catalog)
-python -m app.main --probe --zip 98101
-
-# Run a single scrape cycle (all discovered stores + catalog URLs)
-python -m app.main --once
 ```
-- Optional: copy `.env.example` to `.env` and set `USER_AGENT=` to override the default Playwright user agent if a custom string is required.
-- `--probe` sets the store, opens the first catalog URL, and asserts that cards, titles, and prices are present. It fails fast if selectors drift.
-- `--once` runs the entire loop (all ZIPs + catalog URLs) one time. A successful cycle prints:
+
+## Running the scraper
+
+* One-off cycle (all WA/OR ZIPs, three-at-a-time concurrency):
+
+  ```bash
+  python -m app.main --once
   ```
-  cycle ok | retailer=lowes | zips={N} | items={M} | alerts={K} | duration={XX}s
+
+* Continuous scheduler (default every 180 minutes) with the dashboard enabled:
+
+  ```bash
+  python -m app.main --dashboard
   ```
-- `python -m app.main` enters the scheduled loop (default every 180 minutes via APScheduler).
 
-## Task Scheduler
-1. **Task Scheduler → Create Task…**  
-2. **Triggers** → **On a schedule** → Daily → Repeat every **3 hours** (for 1 day) → Enabled.  
-3. **Actions** → **New…**  
-   - Program/script: `C:\path\to\repo\.venv\Scripts\python.exe`  
-   - Add arguments: `-m app.main`  
-   - Start in: `C:\path\to\repo`  
-4. Check **Run whether user is logged on or not**, save, then **Run** to test.
+* Override ZIPs or categories when needed:
 
-## Configuration
-- `app/config.yml` — retailer toggle, discovery file paths, scrape cadence, alert thresholds, output paths, and healthcheck URL.
-- `catalog/all.lowes.yml` — populated by `python -m app.main --discover-categories`; contains every Lowe's `/c/` and `/pl/` URL found in the public navigation/department pages.
-- `catalog/wa_or_stores.yml` — populated by `python -m app.main --discover-stores`; contains every Washington & Oregon Lowe's ZIP pulled from the public store locator UI.
-- `app/selectors.py` — the only place CSS selectors live. Update these constants if Lowe’s changes markup.
-- `.env` (copy from `.env.example`) — Telegram/SendGrid credentials plus optional overrides like `LOG_LEVEL`, `HTTP_PROXY`, or a custom `USER_AGENT` string. If no transport is configured, alerts are logged only.
+  ```bash
+  python -m app.main --once --zip 98101,97223 --categories "roof|drywall"
+  ```
 
-## What each run does
-1. Discovery (optional) builds `catalog/all.lowes.yml` and `catalog/wa_or_stores.yml` directly from the Lowe's public DOM—no hand curation required.
-2. For every ZIP in the resolved list, Playwright opens lowes.com, sets the store, confirms the header badge, and logs `store=<name> zip=<zip>`.
-3. Each catalog URL is visited with polite waits and page-by-page pagination. If a page renders zero product cards, a `SelectorChangedError` is raised for that category but other pages continue.
-4. Every card supplies: `sku`, `title`, `category`, `price`, `price_was`, `pct_off`, `availability`, `image_url`, `product_url`, `store_id`, `store_name`, `zip`, and `clearance` (badge keywords or `% off >= alerts.pct_drop`).
-5. Observations and Alerts are appended to SQLite (`orwa_lowes.sqlite`). The denormalised latest snapshot is rewritten to `outputs/orwa_items.csv` each cycle with these exact columns:
-   `ts_utc, retailer, store_id, store_name, zip, sku, title, category, price, price_was, pct_off, availability, product_url, image_url`
-6. Logs go to both console and `logs/app.log`. The summary line above is always printed. If `healthcheck_url` is non-empty, the scraper performs a `GET` after a successful cycle.
+The run summary prints to stdout in the form:
+
+```
+cycle ok | retailer=lowes | zips=<N> | items=<M> | alerts=<K> | duration=<seconds>
+```
+
+## Dashboard
+
+The FastAPI dashboard lives at `http://localhost:8000` and provides:
+
+* State filter (`?state=WA` or `?state=OR`)
+* Category dropdown seeded with common building-material departments
+* Sortable, mobile-friendly table highlighting percent-off and price
+* Export to Excel (`/export.xlsx`) and JSON API (`/api/clearance`)
+* `GET /healthz` health check endpoint for uptime monitors
+
+Static assets are served from `app/static` and the templates live under `app/templates`.
+
+## Data pipeline
+
+1. Playwright sets store context for each ZIP code while reusing a single browser instance per run.
+2. Only building-material categories (roofing, drywall, insulation, lumber, etc.) are processed.
+3. Prices are validated and must fall between `$0.01` and `$100,000`. Rows outside the range are quarantined in a dedicated table for investigation.
+4. Observations, alerts, and quarantine entries are stored in `orwa_lowes.sqlite`. Key indexes cover `clearance`, `category`, `zip`, and store lookups for fast dashboard queries.
+5. After a successful run the denormalised export at `outputs/orwa_items.csv` is replaced atomically using a temporary file swap.
+6. The optional Excel export is generated on-demand via the dashboard.
 
 ## CLI switches
-- `--discover-categories` — crawl the public navigation/department pages and write `catalog/all.lowes.yml`.
-- `--discover-stores` — crawl the public store locator UI and write `catalog/wa_or_stores.yml`.
-- `--once` — run a single cycle.
-- `--probe` — quick markup sanity check (optionally accepts `--zip`).
-- `--zip 98101,97204` — override the ZIP list (comma separated).
-- `--categories "roof|insulation"` — regex/substring filter applied to catalog names (case-insensitive).
-- `--concurrency 4` — number of ZIP codes to process in parallel (default `1`).
+
+* `--discover-categories` — crawl the public navigation/department pages and build `catalog/all.lowes.yml`.
+* `--discover-stores` — collect every WA/OR store ZIP and write `catalog/wa_or_stores.yml`.
+* `--once` — run a single scrape cycle.
+* `--dashboard` — launch the FastAPI dashboard alongside the scheduler.
+* `--zip 98101,97223` — override the discovered ZIP list (comma separated).
+* `--categories "roof|insulation"` — regex filter applied to catalog names.
+* `--concurrency N` — number of ZIPs processed concurrently (defaults to `3`).
 
 ## Alerts
-Alerts fire when:
-1. Clearance flips from False/None to True for a `(store_id, sku)` pair.
-2. The new price is less than or equal to `last_price * (1 - alerts.pct_drop)`.
-3. (Optional) If `alerts.abs_thresholds` is set in `app/config.yml`, a drop of at least that amount (either the `default` or a category-specific override) will also trigger an alert.
 
-If Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) or SendGrid (`SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_TO`) credentials are present, alerts are sent with exponential backoff retries and a 1 msg/sec rate limit; otherwise they remain in the SQLite `alerts` table and the logs.
+Alerts are emitted when:
 
-## Troubleshooting
-- **Selector drift** → run `python -m app.main --probe --zip 98101 --categories flooring` to confirm the failure and adjust `app/selectors.py`.
-- **Store context fails** → ensure the Lowe’s site allows you to change stores manually and that the `STORE_BADGE` selector still matches the header badge.
-- **Zero cards scraped** → validate the category URL in `catalog/all.lowes.yml` still renders products for the selected store.
-- **Playwright missing browsers** → rerun `python -m playwright install` inside the virtual environment.
+1. A `(store_id, sku)` transitions into clearance for the first time.
+2. The new price drops by at least `alerts.pct_drop` relative to the previous observation.
+3. An absolute drop threshold (global or category-specific) defined in `app/config.yml` is exceeded.
 
-The program is intentionally boring: one catalog file, one selector module, one orchestration loop. Keep those three sources of truth up to date and the rest runs on rails.
+Notifications are pushed via the configured transports in `.env` (Telegram or SendGrid). Without credentials the alerts remain in the SQLite `alerts` table and are logged.
+
+## Health check and CSV
+
+If `healthcheck_url` is set in `app/config.yml`, a `GET` is issued after every successful run. The CSV export lives at `outputs/orwa_items.csv` and now includes a `state` column in addition to the existing Lowe's metadata.
+
+## Manual verification
+
+See `TESTING.md` for a checklist covering scraper sanity checks, dashboard expectations, and export validation.

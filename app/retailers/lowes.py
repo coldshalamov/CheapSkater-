@@ -261,6 +261,10 @@ async def scrape_category(
 
     _ensure_selectors_configured()
 
+    LOGGER.debug(
+        "Loading category page", extra={"zip": zip_code, "category": category_name, "url": url}
+    )
+
     try:
         await page.goto(url, wait_until="domcontentloaded")
     except Exception as exc:  # pragma: no cover - navigation failure
@@ -352,6 +356,10 @@ async def scrape_category(
             break
 
         await human_wait()
+
+    LOGGER.debug(
+        "Extracted %s products from category", len(products), extra={"zip": zip_code, "category": category_name}
+    )
 
     if not products:
         raise SelectorChangedError(
@@ -519,6 +527,9 @@ async def run_for_zip(
                 row.setdefault("store_id", store_id)
                 row.setdefault("store_name", store_name)
             results.extend(category_rows)
+            LOGGER.debug(
+                "Category complete", extra={"zip": zip_code, "category": name, "items": len(category_rows)}
+            )
             await human_wait()
 
         return results

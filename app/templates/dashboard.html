@@ -1,72 +1,132 @@
 {% extends "base.html" %}
-{% block title %}Clearance Dashboard{% endblock %}
+{% block title %}{% if active_scope == 'new' %}New Today{% else %}Clearance Dashboard{% endif %}{% endblock %}
 {% block content %}
 <section class="dashboard">
     <div class="dashboard-header">
-        <div class="tabs" role="tablist" aria-label="Clearance navigation">
-            <a href="/" class="tab{% if active_tab == 'all' %} active{% endif %}" role="tab">All Clearance</a>
-            <a href="/new-today" class="tab{% if active_tab == 'new' %} active{% endif %}" role="tab">New Today</a>
+        <div class="heading-group">
+            <h1>{% if active_scope == 'new' %}New Today{% else %}All Clearance{% endif %}</h1>
+            <p class="subtitle">Real-time Lowe's building-material clearance for Washington and Oregon.</p>
         </div>
-        <form method="get" action="{{ request.url.path if request else '/' }}" class="category-filter">
-            <label for="category" class="visually-hidden">Filter by category</label>
-            <select id="category" name="category" onchange="this.form.submit()">
-                <option value="">All Categories</option>
-                {% for option in [
-                    'Roofing', 'Drywall', 'Insulation', 'Lumber', 'Flooring',
-                    'Plumbing', 'Electrical', 'Tools', 'Paint', 'Garden',
-                    'Hardware', 'Appliances', 'Lighting', 'Outdoor', 'Seasonal'
-                ] %}
-                <option value="{{ option }}"{% if category == option %} selected{% endif %}>{{ option }}</option>
-                {% endfor %}
-            </select>
-        </form>
+        {% set params = [] %}
+        {% if state and state != 'ALL' %}{% set _ = params.append('state=' ~ state) %}{% endif %}
+        {% if category %}{% set _ = params.append('category=' ~ category|urlencode) %}{% endif %}
+        {% set query = '&'.join(params) %}
+        <div class="toolbar-actions">
+            <a class="btn" href="/export.xlsx?scope={{ active_scope }}{% if query %}&{{ query }}{% endif %}">Export to Excel</a>
+            <a class="btn secondary" href="/api/clearance?scope={{ active_scope }}{% if query %}&{{ query }}{% endif %}" target="_blank" rel="noopener">View JSON</a>
+        </div>
     </div>
 
-    <p class="last-updated">Last updated: {{ last_updated.strftime('%B %d, %Y at %I:%M %p %Z') if last_updated else 'Unknown' }}</p>
+    <form method="get" action="{{ request.url.path if request else '/' }}" class="filters" role="search">
+        <label for="state" class="filter-label">State</label>
+        <select id="state" name="state" onchange="this.form.submit()">
+            {% for option in state_options %}
+            <option value="{{ option if option != 'ALL' else '' }}"{% if (state or 'ALL') == option %} selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+        <label for="category" class="filter-label">Category</label>
+        <select id="category" name="category" onchange="this.form.submit()">
+            <option value="">All Categories</option>
+            {% for option in categories %}
+            <option value="{{ option }}"{% if category == option %} selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    <p class="last-updated">Last updated: {{ last_updated.strftime('%b %d, %Y %I:%M %p %Z') if last_updated else 'No observations yet' }}</p>
 
     {% if items %}
     <div class="table-wrapper">
-        <table class="items-table">
+        <table class="items-table" data-sortable>
             <thead>
                 <tr>
-                    <th scope="col">Item</th>
-                    <th scope="col">Thumbnail</th>
-                    <th scope="col">Current Price</th>
-                    <th scope="col">Was Price</th>
-                    <th scope="col">% Off</th>
-                    <th scope="col">Store</th>
-                    <th scope="col">Availability</th>
+                    <th scope="col" data-sort="string">Item</th>
+                    <th scope="col" data-sort="number">Price</th>
+                    <th scope="col" data-sort="number">Was</th>
+                    <th scope="col" data-sort="number">% Off</th>
+                    <th scope="col" data-sort="string">State</th>
+                    <th scope="col" data-sort="string">ZIP</th>
+                    <th scope="col" data-sort="string">Store</th>
+                    <th scope="col" data-sort="string">Availability</th>
+                    <th scope="col" data-sort="string">Updated</th>
                 </tr>
             </thead>
             <tbody>
                 {% for item in items %}
+                {% set state_value = state_from_zip(item.zip) %}
+                {% set pct_value = (item.pct_off * 100) if item.pct_off is not none else None %}
                 <tr>
-                    <td class="item-title" data-label="Item">
-                        <a href="{{ item.product_url }}" target="_blank" rel="noopener">{{ item.title }}</a>
-                        <div class="item-category">{{ item.category or 'Uncategorized' }}</div>
+                    <td data-label="Item" data-sort-value="{{ item.title|lower }}">
+                        <a href="{{ item.product_url }}" target="_blank" rel="noopener" class="item-link">{{ item.title }}</a>
+                        <div class="item-meta">
+                            <span class="category">{{ item.category or 'Uncategorised' }}</span>
+                            {% if item.sku %}<span class="sku">SKU {{ item.sku }}</span>{% endif %}
+                        </div>
                     </td>
-                    <td class="thumbnail" data-label="Thumbnail">
-                        {% if item.image_url %}
-                        <img src="{{ item.image_url }}" alt="{{ item.title }} thumbnail" width="50" height="50">
-                        {% else %}
-                        <div class="placeholder" aria-hidden="true">N/A</div>
-                        {% endif %}
+                    <td data-label="Price" data-sort-value="{{ item.price if item.price is not none else 0 }}">
+                        {% if item.price is not none %}${{ '%.2f'|format(item.price) }}{% else %}—{% endif %}
                     </td>
-                    <td class="price" data-label="Current Price">${{ '%.2f'|format(item.price) if item.price is not none else 'N/A' }}</td>
-                    <td class="was" data-label="Was Price">{% if item.price_was %}${{ '%.2f'|format(item.price_was) }}{% else %}—{% endif %}</td>
-                    <td class="pct-off" data-label="% Off">{% if item.pct_off %}{{ '%.0f'|format(item.pct_off * 100) }}%{% else %}—{% endif %}</td>
-                    <td class="store" data-label="Store">
+                    <td data-label="Was" data-sort-value="{{ item.price_was if item.price_was is not none else 0 }}">
+                        {% if item.price_was is not none %}${{ '%.2f'|format(item.price_was) }}{% else %}—{% endif %}
+                    </td>
+                    <td data-label="% Off" data-sort-value="{{ pct_value if pct_value is not none else 0 }}">
+                        {% if pct_value is not none %}{{ '%.0f'|format(pct_value) }}%{% else %}—{% endif %}
+                    </td>
+                    <td data-label="State" data-sort-value="{{ state_value or '' }}">{{ state_value or '—' }}</td>
+                    <td data-label="ZIP" data-sort-value="{{ item.zip or '' }}">{{ item.zip or '—' }}</td>
+                    <td data-label="Store" data-sort-value="{{ item.store_name|lower if item.store_name else '' }}">
                         <span class="store-name">{{ item.store_name or 'Unknown store' }}</span>
-                        <span class="zip">{{ item.zip or 'N/A' }}</span>
                     </td>
-                    <td class="availability" data-label="Availability">{{ item.availability or 'Unknown' }}</td>
+                    <td data-label="Availability" data-sort-value="{{ item.availability|lower if item.availability else '' }}">
+                        {{ item.availability or 'Unknown' }}
+                    </td>
+                    <td data-label="Updated" data-sort-value="{{ item.ts_utc.isoformat() if item.ts_utc else '' }}">
+                        {{ item.ts_utc.strftime('%b %d %I:%M %p') if item.ts_utc else '—' }}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     {% else %}
-    <p class="no-results">No clearance items available right now. Please check back later.</p>
+    <p class="no-results">No clearance items match your filters. Try another state or category.</p>
     {% endif %}
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const tables = document.querySelectorAll('table[data-sortable]');
+  tables.forEach((table) => {
+    table.querySelectorAll('th[data-sort]').forEach((header, index) => {
+      header.addEventListener('click', () => {
+        const sortType = header.dataset.sort;
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const ascending = header.dataset.order !== 'asc';
+        rows.sort((a, b) => {
+          const aCell = a.children[index];
+          const bCell = b.children[index];
+          const aValue = aCell.dataset.sortValue ?? aCell.textContent.trim();
+          const bValue = bCell.dataset.sortValue ?? bCell.textContent.trim();
+          if (sortType === 'number') {
+            const aNum = parseFloat(aValue) || 0;
+            const bNum = parseFloat(bValue) || 0;
+            return ascending ? aNum - bNum : bNum - aNum;
+          }
+          return ascending
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        });
+        tbody.replaceChildren(...rows);
+        table.querySelectorAll('th[data-sort]').forEach((th) => {
+          th.dataset.order = '';
+        });
+        header.dataset.order = ascending ? 'asc' : 'desc';
+      });
+    });
+  });
+});
+</script>
 {% endblock %}

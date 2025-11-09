@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -62,6 +62,9 @@ class Observation(Base):
     __table_args__ = (
         Index("ix_observations_store_sku_ts", "store_id", "sku", "ts_utc"),
         Index("ix_observations_store_id", "store_id"),
+        Index("ix_observations_clearance_ts", "clearance", "ts_utc"),
+        Index("ix_observations_category_clearance", "category", "clearance"),
+        Index("ix_observations_zip_ts", "zip", "ts_utc"),
     )
 
 
@@ -80,3 +83,26 @@ class Alert(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class Quarantine(Base):
+    """Row quarantine storage for invalid or suspicious scrape results."""
+
+    __tablename__ = "quarantine"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retailer: Mapped[str] = mapped_column(String, nullable=False)
+    store_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    sku: Mapped[str | None] = mapped_column(String, nullable=True)
+    zip: Mapped[str | None] = mapped_column(String, nullable=True)
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("ix_quarantine_ts", "ts_utc"),
+        Index("ix_quarantine_reason", "reason"),
+        Index("ix_quarantine_zip", "zip"),
+    )
