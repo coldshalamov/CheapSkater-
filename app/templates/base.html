@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}CheapSkater Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1><a href="/">CheapSkater Clearance Dashboard</a></h1>
+        <nav>
+            <a href="/">All Clearance</a>
+            <a href="/new-today">New Today</a>
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>Data sourced from Lowe's clearance observations.</p>
+    </footer>
+</body>
+</html>
