@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -33,12 +34,67 @@ from app.extractors.dom_utils import human_wait
 from app.logging_config import get_logger
 from app.retailers.lowes import run_for_zip
 from app.storage import repo
-from app.storage.db import get_engine, init_db, make_session
+from app.storage.db import check_quarantine_table, get_engine, init_db_safe, make_session
 from app.storage.models_sql import Alert, Observation
 import app.selectors as selectors
 
 
 LOGGER = get_logger(__name__)
+
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "retailers": {
+        "lowes": {
+            "enabled": True,
+            "zips": [
+                "98101",
+                "98115",
+                "98052",
+                "98402",
+                "99201",
+                "98661",
+                "97204",
+                "97223",
+                "97005",
+                "97301",
+                "97401",
+                "97702",
+            ],
+            "catalog_path": "catalog/building_materials.lowes.yml",
+        }
+    },
+    "output": {
+        "csv_path": "outputs/orwa_items.csv",
+        "sqlite_path": "orwa_lowes.sqlite",
+    },
+    "schedule": {"minutes": 180},
+    "alerts": {"pct_drop": 0.25, "abs_thresholds": {}},
+    "material_keywords": [
+        "roofing",
+        "drywall",
+        "sheetrock",
+        "insulation",
+        "lumber",
+        "plywood",
+        "flooring",
+        "tile",
+        "deck",
+        "fence",
+        "concrete",
+        "cement",
+        "mortar",
+        "siding",
+        "trim",
+        "moulding",
+        "plumbing",
+        "electrical",
+        "hardware",
+        "tool",
+    ],
+    "quarantine_retention_days": 7,
+    "healthcheck_url": "",
+    "max_concurrency": 3,
+}
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -113,9 +169,48 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _deep_merge(default: Any, override: Any) -> Any:
+    if not isinstance(default, dict) or not isinstance(override, dict):
+        return deepcopy(override)
+
+    merged: dict[str, Any] = deepcopy(default)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _validate_material_keywords(raw_value: Any) -> None:
+    if raw_value is None:
+        LOGGER.warning("material_keywords missing in configuration; using defaults")
+        return
+
+    if isinstance(raw_value, (list, tuple, set)):
+        cleaned = [str(item).strip() for item in raw_value if str(item).strip()]
+        if not cleaned:
+            LOGGER.warning(
+                "material_keywords is empty after cleanup; using defaults",
+            )
+        return
+
+    LOGGER.warning(
+        "material_keywords must be a sequence of strings; using defaults",
+    )
+
+
 def _load_config(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        LOGGER.warning("Configuration file %s not found; using defaults", path)
+        data = {}
+
+    merged = _deep_merge(DEFAULT_CONFIG, data) if data else deepcopy(DEFAULT_CONFIG)
+    _validate_material_keywords(merged.get("material_keywords"))
+    return merged
 
 
 def _load_catalog(path: Path) -> list[dict[str, str]]:
@@ -606,20 +701,21 @@ async def _process_row(
         return float(v), None
 
     def _quarantine_row(reason: str, payload: dict[str, Any]) -> None:
+        session = None
         try:
-            with session_factory() as quarantine_session:
-                repo.insert_quarantine(
-                    quarantine_session,
-                    retailer="lowes",
-                    store_id=store_id,
-                    sku=canonical_sku,
-                    zip_code=store_zip,
-                    state=store_state,
-                    category=category,
-                    reason=reason,
-                    payload=payload,
-                )
-                quarantine_session.commit()
+            session = session_factory()
+            repo.insert_quarantine(
+                session,
+                retailer="lowes",
+                store_id=store_id,
+                sku=canonical_sku,
+                zip_code=store_zip,
+                state=store_state,
+                category=category,
+                reason=reason,
+                payload=payload,
+            )
+            session.commit()
         except Exception as exc:
             LOGGER.exception(
                 "Failed to record quarantine for sku=%s: %s",
@@ -628,6 +724,12 @@ async def _process_row(
                 extra={"zip": zip_code, "category": category, "url": product_url},
             )
             return
+        finally:
+            try:
+                if session is not None:
+                    session.close()
+            finally:
+                LOGGER.debug("Session closed")
 
     def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
         candidate = (raw_sku or "").strip()
@@ -728,130 +830,131 @@ async def _process_row(
     ts_now = datetime.now(timezone.utc)
     alerts_created = 0
 
+    session = None
     try:
-        with session_factory() as session:
-            repo.upsert_store(
-                session,
-                store_id,
-                store_name,
-                zip_code=store_zip,
-                city=_derive_city_from_store_name(store_name),
-                state=store_state,
-            )
-            last_obs = repo.get_last_observation(session, store_id, sku, product_url)
-            repo.upsert_item(
-                session,
-                canonical_sku,
-                "lowes",
-                title,
-                category,
-                product_url,
-                image_url=image_url,
-            )
-            obs_model = Observation(
+        session = session_factory()
+        repo.upsert_store(
+            session,
+            store_id,
+            store_name,
+            zip_code=store_zip,
+            city=_derive_city_from_store_name(store_name),
+            state=store_state,
+        )
+        last_obs = repo.get_last_observation(session, store_id, sku, product_url)
+        repo.upsert_item(
+            session,
+            canonical_sku,
+            "lowes",
+            title,
+            category,
+            product_url,
+            image_url=image_url,
+        )
+        obs_model = Observation(
+            ts_utc=ts_now,
+            store_id=store_id,
+            sku=canonical_sku,
+            retailer="lowes",
+            store_name=store_name,
+            zip=store_zip,
+            title=title,
+            category=category,
+            product_url=product_url,
+            image_url=image_url,
+            price=price,
+            price_was=price_was,
+            pct_off=pct_off,
+            clearance=clearance_flag,
+            availability=availability,
+        )
+        repo.insert_observation(session, obs_model)
+        session.commit()
+
+        new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
+        triggered: list[str] = []
+        price_drop = repo.should_alert_price_drop(last_obs, obs_model, pct_threshold)
+        if price_drop:
+            triggered.append(f"pct>={pct_threshold:.2f}")
+
+        # Absolute-drop logic (category-specific or default)
+        abs_key = (category or "").strip().lower()
+        abs_th = abs_map.get(abs_key, abs_map.get("default"))
+        if abs_th and (
+            last_obs
+            and last_obs.price is not None
+            and obs_model.price is not None
+        ):
+            try:
+                if (last_obs.price - obs_model.price) >= float(abs_th):
+                    triggered.append(f"abs>={abs_th}")
+                    price_drop = True
+            except Exception:
+                pass
+
+        LOGGER.debug(
+            "alert check sku=%s rules=%s",
+            canonical_sku,
+            ",".join(triggered),
+        )
+
+        if new_clearance:
+            alert = Alert(
                 ts_utc=ts_now,
+                alert_type="new_clearance",
                 store_id=store_id,
                 sku=canonical_sku,
                 retailer="lowes",
-                store_name=store_name,
-                zip=store_zip,
-                title=title,
-                category=category,
-                product_url=product_url,
-                image_url=image_url,
-                price=price,
-                price_was=price_was,
-                pct_off=pct_off,
-                clearance=clearance_flag,
-                availability=availability,
+                pct_off=obs_model.pct_off,
+                price=obs_model.price,
+                price_was=obs_model.price_was,
+                note=f"zip={store_zip}",
             )
-            repo.insert_observation(session, obs_model)
+            repo.insert_alert(session, alert)
             session.commit()
+            try:
+                notifier.notify_new_clearance(obs_model)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.error(
+                    "Notifier failed for clearance (sku=%s): %s",
+                    canonical_sku,
+                    exc,
+                    extra={"zip": zip_code, "category": category, "url": product_url},
+                )
+            alerts_created += 1
 
-            new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
-            triggered: list[str] = []
-            price_drop = repo.should_alert_price_drop(last_obs, obs_model, pct_threshold)
-            if price_drop:
-                triggered.append(f"pct>={pct_threshold:.2f}")
-
-            # Absolute-drop logic (category-specific or default)
-            abs_key = (category or "").strip().lower()
-            abs_th = abs_map.get(abs_key, abs_map.get("default"))
-            if abs_th and (
-                last_obs
-                and last_obs.price is not None
+        if price_drop and last_obs is not None:
+            drop_pct = None
+            if (
+                last_obs.price is not None
+                and last_obs.price > 0
                 and obs_model.price is not None
             ):
-                try:
-                    if (last_obs.price - obs_model.price) >= float(abs_th):
-                        triggered.append(f"abs>={abs_th}")
-                        price_drop = True
-                except Exception:
-                    pass
+                drop_pct = (last_obs.price - obs_model.price) / last_obs.price
 
-            LOGGER.debug(
-                "alert check sku=%s rules=%s",
-                canonical_sku,
-                ",".join(triggered),
+            alert = Alert(
+                ts_utc=ts_now,
+                alert_type="price_drop",
+                store_id=store_id,
+                sku=canonical_sku,
+                retailer="lowes",
+                pct_off=drop_pct,
+                price=obs_model.price,
+                price_was=last_obs.price,
+                note=f"zip={store_zip}",
             )
-
-            if new_clearance:
-                alert = Alert(
-                    ts_utc=ts_now,
-                    alert_type="new_clearance",
-                    store_id=store_id,
-                    sku=canonical_sku,
-                    retailer="lowes",
-                    pct_off=obs_model.pct_off,
-                    price=obs_model.price,
-                    price_was=obs_model.price_was,
-                    note=f"zip={store_zip}",
+            repo.insert_alert(session, alert)
+            session.commit()
+            try:
+                notifier.notify_price_drop(obs_model, last_obs)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.error(
+                    "Notifier failed for price drop (sku=%s): %s",
+                    canonical_sku,
+                    exc,
+                    extra={"zip": zip_code, "category": category, "url": product_url},
                 )
-                repo.insert_alert(session, alert)
-                session.commit()
-                try:
-                    notifier.notify_new_clearance(obs_model)
-                except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.error(
-                        "Notifier failed for clearance (sku=%s): %s",
-                        canonical_sku,
-                        exc,
-                        extra={"zip": zip_code, "category": category, "url": product_url},
-                    )
-                alerts_created += 1
-
-            if price_drop and last_obs is not None:
-                drop_pct = None
-                if (
-                    last_obs.price is not None
-                    and last_obs.price > 0
-                    and obs_model.price is not None
-                ):
-                    drop_pct = (last_obs.price - obs_model.price) / last_obs.price
-
-                alert = Alert(
-                    ts_utc=ts_now,
-                    alert_type="price_drop",
-                    store_id=store_id,
-                    sku=canonical_sku,
-                    retailer="lowes",
-                    pct_off=drop_pct,
-                    price=obs_model.price,
-                    price_was=last_obs.price,
-                    note=f"zip={store_zip}",
-                )
-                repo.insert_alert(session, alert)
-                session.commit()
-                try:
-                    notifier.notify_price_drop(obs_model, last_obs)
-                except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.error(
-                        "Notifier failed for price drop (sku=%s): %s",
-                        canonical_sku,
-                        exc,
-                        extra={"zip": zip_code, "category": category, "url": product_url},
-                    )
-                alerts_created += 1
+            alerts_created += 1
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.exception(
             "Failed to persist row for sku=%s: %s",
@@ -860,6 +963,12 @@ async def _process_row(
             extra={"zip": zip_code, "category": category, "url": product_url},
         )
         return 0, 0
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        finally:
+            LOGGER.debug("Session closed")
 
     return 1, alerts_created
 
@@ -869,12 +978,19 @@ def _export_csv(config: dict[str, Any], session_factory) -> None:
     csv_path = config.get("output", {}).get("csv_path")
     if not csv_path:
         return
+    session = None
     try:
-        with session_factory() as session:
-            rows = repo.flatten_for_csv(session)
+        session = session_factory()
+        rows = repo.flatten_for_csv(session)
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.error("Failed to query rows for CSV export: %s", exc)
         return
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        finally:
+            LOGGER.debug("Session closed")
 
     try:
         repo.write_csv(rows, csv_path)
@@ -978,7 +1094,8 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         raise RuntimeError("No categories matched the provided filter.")
 
     engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
-    init_db(engine)
+    init_db_safe(engine)
+    LOGGER.info("Database initialized (existing tables preserved)")
     session_factory = make_session(engine)
 
     notifier = Notifier()
@@ -997,8 +1114,10 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         retention_days = 30
 
     if retention_days > 0:
-        try:
-            with session_factory() as session:
+        if check_quarantine_table(engine):
+            session = None
+            try:
+                session = session_factory()
                 removed = repo.cleanup_quarantine(session, days=retention_days)
                 session.commit()
                 LOGGER.info(
@@ -1006,8 +1125,16 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
                     removed,
                     retention_days,
                 )
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.warning("Quarantine cleanup failed: %s", exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("Quarantine cleanup failed: %s", exc)
+            finally:
+                try:
+                    if session is not None:
+                        session.close()
+                finally:
+                    LOGGER.debug("Session closed")
+        else:
+            LOGGER.info("Quarantine cleanup skipped: quarantine table missing")
 
     if args.once or args.probe:
         return

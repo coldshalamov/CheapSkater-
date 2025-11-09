@@ -39,5 +39,6 @@ material_keywords:
   - tool
 
 # Quarantine cleanup
-quarantine_retention_days: 30  # Remove quarantined rows after this many days
+quarantine_retention_days: 7  # Remove quarantined rows after this many days
+max_concurrency: 3
 healthcheck_url: ""
