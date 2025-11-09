@@ -17,6 +17,26 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
+## Configuration
+
+Key settings in `app/config.yml`:
+
+```yaml
+material_keywords:
+  - roofing
+  - drywall
+  - insulation
+  # ... add or remove as needed
+
+quarantine_retention_days: 30  # Auto-cleanup invalid records
+
+schedule:
+  minutes: 180
+
+alerts:
+  pct_drop: 0.25
+```
+
 ## First-time discovery
 
 Generate the monitored catalog and ZIP list directly from lowes.com. Both commands only need to be run when you want to refresh the catalog or store list.
@@ -100,3 +120,4 @@ If `healthcheck_url` is set in `app/config.yml`, a `GET` is issued after every s
 ## Manual verification
 
 See `TESTING.md` for a checklist covering scraper sanity checks, dashboard expectations, and export validation.
+Run `python -m app.main --probe --zip 98101` after any Lowe's UI changes to validate selectors.

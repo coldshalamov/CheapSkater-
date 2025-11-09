@@ -53,6 +53,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Run the pipeline a single time instead of on a schedule.",
     )
     parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Quick sanity check: scrape one category at one ZIP and exit.",
+    )
+    parser.add_argument(
         "--discover-categories",
         action="store_true",
         help="Run catalog discovery for Lowe's and write catalog/all.lowes.yml.",
@@ -254,13 +259,35 @@ _BUILDING_MATERIAL_KEYWORDS = {
 }
 
 
+_MATERIAL_KEYWORDS: set[str] = set(_BUILDING_MATERIAL_KEYWORDS)
+
+
+def _configure_material_keywords(config: dict[str, Any]) -> None:
+    """Load building-material keywords from *config* into module state."""
+
+    global _MATERIAL_KEYWORDS
+
+    candidates = config.get("material_keywords")
+    if isinstance(candidates, (list, tuple, set)):
+        cleaned = {
+            str(keyword).strip().lower()
+            for keyword in candidates
+            if str(keyword).strip()
+        }
+        if cleaned:
+            _MATERIAL_KEYWORDS = cleaned
+            return
+
+    _MATERIAL_KEYWORDS = set(_BUILDING_MATERIAL_KEYWORDS)
+
+
 def _is_building_material_category(category: str) -> bool:
     """Return True when *category* is relevant to building materials."""
 
     normalized = (category or "").strip().lower()
     if not normalized:
         return False
-    return any(keyword in normalized for keyword in _BUILDING_MATERIAL_KEYWORDS)
+    return any(keyword in normalized for keyword in _MATERIAL_KEYWORDS)
 
 
 _LOWES_PREFIX_RE = re.compile(r"(?i)^l\s*owe'?s(?:\s+home\s+improvement)?(?:\s+of)?\s*")
@@ -338,6 +365,90 @@ async def _run_cycle(
     any_zip_success = False
 
     try:
+        if args.probe:
+            target_zip = zips[0]
+            target_category = categories[0]
+            category_name = target_category.get("name", "unknown")
+            LOGGER.info(
+                "Probe mode | zip=%s | category=%s",
+                target_zip,
+                category_name,
+            )
+
+            async with async_playwright() as playwright:
+                browser = await playwright.chromium.launch(headless=True)
+                try:
+                    try:
+                        rows = await run_for_zip(
+                            playwright,
+                            target_zip,
+                            [target_category],
+                            clearance_threshold=pct_threshold,
+                            browser=browser,
+                        )
+                    except StoreContextError as exc:
+                        LOGGER.error(
+                            "Probe failed to set store context for zip=%s: %s",
+                            target_zip,
+                            exc,
+                        )
+                        return 0, 0
+                    except SelectorChangedError as exc:
+                        LOGGER.error(
+                            "Probe selector failure | zip=%s | category=%s | url=%s | error=%s",
+                            target_zip,
+                            getattr(exc, "category", category_name),
+                            getattr(exc, "url", "unknown"),
+                            exc,
+                        )
+                        return 0, 0
+                    except PageLoadError as exc:
+                        LOGGER.error(
+                            "Probe page load error | zip=%s | category=%s | url=%s | error=%s",
+                            target_zip,
+                            getattr(exc, "category", category_name),
+                            getattr(exc, "url", "unknown"),
+                            exc,
+                        )
+                        return 0, 0
+
+                    if not rows:
+                        LOGGER.warning(
+                            "Probe returned zero rows | zip=%s | category=%s",
+                            target_zip,
+                            category_name,
+                        )
+                        return 0, 0
+
+                    processed_items = 0
+                    processed_alerts = 0
+                    for row in rows[:5]:
+                        items, alerts = await _process_row(
+                            row,
+                            target_zip,
+                            session_factory,
+                            notifier,
+                            pct_threshold,
+                            abs_map,
+                        )
+                        processed_items += items
+                        processed_alerts += alerts
+
+                    LOGGER.info(
+                        "Probe complete | zip=%s | category=%s | scraped=%d | processed=%d | alerts=%d",
+                        target_zip,
+                        category_name,
+                        len(rows),
+                        processed_items,
+                        processed_alerts,
+                    )
+                    return processed_items, processed_alerts
+                finally:
+                    try:
+                        await browser.close()
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.warning("Failed to close probe browser: %s", exc)
+
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
 
@@ -816,6 +927,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 
     config_path = Path("app/config.yml")
     config = _load_config(config_path)
+    _configure_material_keywords(config)
 
     catalog_file = _resolve_catalog_path(config)
     retailers = config.get("retailers", {})
@@ -877,10 +989,29 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         LOGGER.exception("Initial run cycle failed")
         raise
 
-    if args.once:
+    interval_minutes = config.get("schedule", {}).get("minutes", 180) or 180
+    retention_value = config.get("quarantine_retention_days", 30)
+    try:
+        retention_days = int(retention_value)
+    except (TypeError, ValueError):
+        retention_days = 30
+
+    if retention_days > 0:
+        try:
+            with session_factory() as session:
+                removed = repo.cleanup_quarantine(session, days=retention_days)
+                session.commit()
+                LOGGER.info(
+                    "Quarantine cleanup completed | removed=%d | retention_days=%d",
+                    removed,
+                    retention_days,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("Quarantine cleanup failed: %s", exc)
+
+    if args.once or args.probe:
         return
 
-    interval_minutes = config.get("schedule", {}).get("minutes", 180) or 180
     if interval_minutes <= 0:
         interval_minutes = 180
 

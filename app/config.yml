@@ -4,12 +4,40 @@ retailers:
     zips: ["98101","98115","98052","98402","99201","98661","97204","97223","97005","97301","97401","97702"]
     catalog_path: "catalog/building_materials.lowes.yml"
     # zips_path: "catalog/wa_or_stores.yml"  # not used when inline zips are set
-schedule:
-  minutes: 180
-alerts:
-  pct_drop: 0.25
-  abs_thresholds: {}
 output:
   csv_path: "outputs/orwa_items.csv"
   sqlite_path: "orwa_lowes.sqlite"
+
+schedule:
+  minutes: 180
+
+alerts:
+  pct_drop: 0.25
+  abs_thresholds: {}
+
+# Keywords to identify building-material categories (case-insensitive)
+material_keywords:
+  - roofing
+  - drywall
+  - sheetrock
+  - insulation
+  - lumber
+  - plywood
+  - flooring
+  - tile
+  - deck
+  - fence
+  - concrete
+  - cement
+  - mortar
+  - siding
+  - trim
+  - moulding
+  - plumbing
+  - electrical
+  - hardware
+  - tool
+
+# Quarantine cleanup
+quarantine_retention_days: 30  # Remove quarantined rows after this many days
 healthcheck_url: ""
