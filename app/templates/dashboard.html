@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block title %}Clearance Dashboard{% endblock %}
+{% block content %}
+<section class="dashboard">
+    <div class="dashboard-header">
+        <div class="tabs" role="tablist" aria-label="Clearance navigation">
+            <a href="/" class="tab{% if active_tab == 'all' %} active{% endif %}" role="tab">All Clearance</a>
+            <a href="/new-today" class="tab{% if active_tab == 'new' %} active{% endif %}" role="tab">New Today</a>
+        </div>
+        <form method="get" action="{{ request.url.path if request else '/' }}" class="category-filter">
+            <label for="category" class="visually-hidden">Filter by category</label>
+            <select id="category" name="category" onchange="this.form.submit()">
+                <option value="">All Categories</option>
+                {% for option in [
+                    'Roofing', 'Drywall', 'Insulation', 'Lumber', 'Flooring',
+                    'Plumbing', 'Electrical', 'Tools', 'Paint', 'Garden',
+                    'Hardware', 'Appliances', 'Lighting', 'Outdoor', 'Seasonal'
+                ] %}
+                <option value="{{ option }}"{% if category == option %} selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <p class="last-updated">Last updated: {{ last_updated.strftime('%B %d, %Y at %I:%M %p %Z') if last_updated else 'Unknown' }}</p>
+
+    {% if items %}
+    <div class="table-wrapper">
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th scope="col">Item</th>
+                    <th scope="col">Thumbnail</th>
+                    <th scope="col">Current Price</th>
+                    <th scope="col">Was Price</th>
+                    <th scope="col">% Off</th>
+                    <th scope="col">Store</th>
+                    <th scope="col">Availability</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td class="item-title" data-label="Item">
+                        <a href="{{ item.product_url }}" target="_blank" rel="noopener">{{ item.title }}</a>
+                        <div class="item-category">{{ item.category or 'Uncategorized' }}</div>
+                    </td>
+                    <td class="thumbnail" data-label="Thumbnail">
+                        {% if item.image_url %}
+                        <img src="{{ item.image_url }}" alt="{{ item.title }} thumbnail" width="50" height="50">
+                        {% else %}
+                        <div class="placeholder" aria-hidden="true">N/A</div>
+                        {% endif %}
+                    </td>
+                    <td class="price" data-label="Current Price">${{ '%.2f'|format(item.price) if item.price is not none else 'N/A' }}</td>
+                    <td class="was" data-label="Was Price">{% if item.price_was %}${{ '%.2f'|format(item.price_was) }}{% else %}—{% endif %}</td>
+                    <td class="pct-off" data-label="% Off">{% if item.pct_off %}{{ '%.0f'|format(item.pct_off * 100) }}%{% else %}—{% endif %}</td>
+                    <td class="store" data-label="Store">
+                        <span class="store-name">{{ item.store_name or 'Unknown store' }}</span>
+                        <span class="zip">{{ item.zip or 'N/A' }}</span>
+                    </td>
+                    <td class="availability" data-label="Availability">{{ item.availability or 'Unknown' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="no-results">No clearance items available right now. Please check back later.</p>
+    {% endif %}
+</section>
+
+<style>
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 1rem;
+    background: #f7f9fc;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.dashboard-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+}
+
+.tabs {
+    display: inline-flex;
+    background: #e6edf7;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 73, 144, 0.2);
+}
+
+.tabs .tab {
+    padding: 0.5rem 1.25rem;
+    font-weight: 600;
+    color: #004990;
+    text-decoration: none;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tabs .tab:hover,
+.tabs .tab:focus {
+    background: rgba(0, 73, 144, 0.15);
+}
+
+.tabs .tab.active {
+    background: #004990;
+    color: #ffffff;
+}
+
+.category-filter select {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(0, 73, 144, 0.3);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    min-width: 180px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.last-updated {
+    font-size: 0.9rem;
+    color: #4a4a4a;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.items-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.items-table th,
+.items-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #e1e8f0;
+}
+
+.items-table thead {
+    background: #004990;
+    color: #ffffff;
+}
+
+.items-table tbody tr:hover {
+    background: #f0f6ff;
+}
+
+.item-title a {
+    font-weight: 600;
+    color: #004990;
+    text-decoration: none;
+}
+
+.item-title a:hover,
+.item-title a:focus {
+    text-decoration: underline;
+}
+
+.item-category {
+    font-size: 0.85rem;
+    color: #6c7a89;
+    margin-top: 0.25rem;
+}
+
+.thumbnail img {
+    border-radius: 8px;
+    object-fit: cover;
+    width: 50px;
+    height: 50px;
+}
+
+.thumbnail .placeholder {
+    width: 50px;
+    height: 50px;
+    display: grid;
+    place-items: center;
+    background: #e6edf7;
+    color: #6c7a89;
+    border-radius: 8px;
+    font-size: 0.75rem;
+}
+
+.price {
+    font-weight: 700;
+    color: #c62828;
+}
+
+.was {
+    text-decoration: line-through;
+    color: #6c7a89;
+}
+
+.pct-off {
+    font-weight: 700;
+    color: #1b8a3b;
+}
+
+.store {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.store .store-name {
+    font-weight: 600;
+}
+
+.store .zip {
+    font-size: 0.85rem;
+    color: #6c7a89;
+}
+
+.availability {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.no-results {
+    text-align: center;
+    font-size: 1.1rem;
+    color: #6c7a89;
+    padding: 2rem 0;
+}
+
+@media (max-width: 768px) {
+    .dashboard {
+        padding: 1rem 0.75rem;
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .category-filter select {
+        width: 100%;
+    }
+
+    .items-table thead {
+        display: none;
+    }
+
+    .items-table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-bottom: 1px solid #d9e3f2;
+    }
+
+    .items-table tbody tr td {
+        border: none;
+        padding: 0;
+    }
+
+    .items-table tbody tr td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6c7a89;
+        margin-bottom: 0.25rem;
+    }
+
+    .items-table tbody tr td.price,
+    .items-table tbody tr td.was,
+    .items-table tbody tr td.pct-off,
+    .items-table tbody tr td.store,
+    .items-table tbody tr td.availability {
+        font-size: 0.95rem;
+    }
+}
+</style>
+{% endblock %}
