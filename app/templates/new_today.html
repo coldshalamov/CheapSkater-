@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}New Clearance Today{% endblock %}
+{% block content %}
+<section class="results">
+    <h2>New Clearance Items Today</h2>
+    {% if items %}
+    <ul class="item-list">
+        {% for item in items %}
+        <li>
+            <h3><a href="{{ item.product_url }}" target="_blank" rel="noopener">{{ item.title }}</a></h3>
+            <p class="category">Category: {{ item.category }}</p>
+            <p class="pricing">
+                <span class="price">${{ '%.2f'|format(item.price) if item.price is not none else 'N/A' }}</span>
+                {% if item.price_was %}
+                <span class="was">Was ${{ '%.2f'|format(item.price_was) }}</span>
+                {% endif %}
+                {% if item.pct_off %}
+                <span class="pct">{{ '%.0f'|format(item.pct_off * 100) }}% off</span>
+                {% endif %}
+            </p>
+            <p class="store">{{ item.store_name or 'Unknown store' }} ({{ item.zip or 'N/A' }})</p>
+            <p class="timestamp">Observed {{ item.ts_utc.strftime('%Y-%m-%d %H:%M %Z') if item.ts_utc else '' }}</p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No new clearance items in the last 24 hours.</p>
+    {% endif %}
+</section>
+{% endblock %}

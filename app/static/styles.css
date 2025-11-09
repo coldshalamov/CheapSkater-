@@ -1,0 +1,87 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background: #f7f7f7;
+    color: #333;
+}
+
+a {
+    color: #0d47a1;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+header {
+    background: #1e88e5;
+    color: #fff;
+    padding: 1rem;
+}
+
+header h1 {
+    margin: 0 0 0.5rem 0;
+}
+
+header nav a {
+    margin-right: 1rem;
+    color: #fff;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+main {
+    padding: 1rem 2rem;
+}
+
+.filters form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.filters input[type="text"] {
+    padding: 0.5rem;
+    flex: 1;
+}
+
+.filters button,
+.filters .clear {
+    padding: 0.5rem 1rem;
+    background: #1e88e5;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.filters .clear {
+    background: #d32f2f;
+}
+
+.results ul {
+    list-style: none;
+    padding: 0;
+}
+
+.results li {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.pricing span {
+    margin-right: 0.75rem;
+}
+
+footer {
+    text-align: center;
+    padding: 1rem;
+    background: #eceff1;
+    margin-top: 2rem;
+}
