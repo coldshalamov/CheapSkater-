@@ -9,6 +9,8 @@ from urllib.parse import urljoin
 
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
+from playwright.async_api import async_playwright
+
 import app.selectors as selectors
 from app.errors import PageLoadError, SelectorChangedError, StoreContextError
 from app.extractors import schemas
@@ -461,7 +463,7 @@ async def _extract_sku(card: Any, product_url: str | None) -> str | None:
 
 
 async def run_for_zip(
-    playwright: Any,
+    playwright: Any | None,
     zip_code: str,
     categories: list[dict[str, Any]],
     *,
@@ -470,85 +472,105 @@ async def run_for_zip(
 ) -> list[dict[str, Any]]:
     """Execute the Lowe's workflow for a single ZIP."""
 
-    user_agent = _resolve_user_agent()
-    owns_browser = browser is None
-    if owns_browser:
-        browser = await playwright.chromium.launch(headless=True)
+    async def _execute(active_playwright: Any) -> list[dict[str, Any]]:
+        extra = {"zip": zip_code}
+        active_browser = browser
+        owns_browser = active_browser is None
+        user_agent = _resolve_user_agent()
 
-    context_kwargs: dict[str, Any] = {
-        "viewport": {"width": 1440, "height": 900},
-        "storage_state": None,
-    }
-    if user_agent:
-        context_kwargs["user_agent"] = user_agent
-
-    assert browser is not None
-    context = await browser.new_context(**context_kwargs)
-    page = await context.new_page()
-
-    try:
-        store_id, store_name = await set_store_context(
-            page,
-            zip_code,
-            user_agent=user_agent,
-        )
-        results: list[dict[str, Any]] = []
-
-        for category in categories:
-            name = (category or {}).get("name")
-            url = (category or {}).get("url")
-            if not name or not url:
-                continue
-
-            LOGGER.info(
-                "Starting category=%s zip=%s",
-                name,
-                zip_code,
-                extra={"zip": zip_code, "category": name, "url": url},
-            )
-
-            @retry(
-                stop=stop_after_attempt(3),
-                wait=wait_random_exponential(multiplier=0.5, max=5),
-                reraise=True,
-            )
-            async def _scrape() -> list[dict[str, Any]]:
-                await human_wait()
-                return await scrape_category(
-                    page,
-                    url,
-                    name,
-                    zip_code,
-                    clearance_threshold=clearance_threshold,
-                )
-
-            category_rows = await _scrape()
-            for row in category_rows:
-                row.setdefault("store_id", store_id)
-                row.setdefault("store_name", store_name)
-            results.extend(category_rows)
-            LOGGER.debug(
-                "Category complete", extra={"zip": zip_code, "category": name, "items": len(category_rows)}
-            )
-            await human_wait()
-
-        return results
-    finally:
         try:
-            await context.close()
-        except Exception as exc:
-            LOGGER.warning(
-                "Failed to close browser context: %s",
-                exc,
-                extra={"zip": zip_code},
-            )
-        if owns_browser:
-            assert browser is not None  # for type checking
+            if owns_browser:
+                active_browser = await active_playwright.chromium.launch(headless=True)
+
+            assert active_browser is not None
+
+            context_kwargs: dict[str, Any] = {
+                "viewport": {"width": 1440, "height": 900},
+                "storage_state": None,
+            }
+            if user_agent:
+                context_kwargs["user_agent"] = user_agent
+
+            results: list[dict[str, Any]] = []
+
+            async with active_browser.new_context(**context_kwargs) as context:
+                page: Any | None = None
+                try:
+                    page = await context.new_page()
+                    store_id, store_name = await set_store_context(
+                        page,
+                        zip_code,
+                        user_agent=user_agent,
+                    )
+
+                    for category in categories:
+                        name = (category or {}).get("name")
+                        url = (category or {}).get("url")
+                        if not name or not url:
+                            continue
+
+                        LOGGER.info(
+                            "Starting category=%s zip=%s",
+                            name,
+                            zip_code,
+                            extra={"zip": zip_code, "category": name, "url": url},
+                        )
+
+                        @retry(
+                            stop=stop_after_attempt(3),
+                            wait=wait_random_exponential(multiplier=0.5, max=5),
+                            reraise=True,
+                        )
+                        async def _scrape() -> list[dict[str, Any]]:
+                            await human_wait()
+                            return await scrape_category(
+                                page,
+                                url,
+                                name,
+                                zip_code,
+                                clearance_threshold=clearance_threshold,
+                            )
+
+                        category_rows = await _scrape()
+                        for row in category_rows:
+                            row.setdefault("store_id", store_id)
+                            row.setdefault("store_name", store_name)
+                        results.extend(category_rows)
+                        LOGGER.debug(
+                            "Category complete",
+                            extra={
+                                "zip": zip_code,
+                                "category": name,
+                                "items": len(category_rows),
+                            },
+                        )
+                        await human_wait()
+                finally:
+                    if page is not None:
+                        try:
+                            await page.close()
+                        except Exception as exc:
+                            LOGGER.warning(
+                                "Failed to close page: %s",
+                                exc,
+                                extra=extra,
+                            )
+
+            return results
+        finally:
             try:
-                await browser.close()
+                if owns_browser and active_browser is not None:
+                    await active_browser.close(timeout=5000)
             except Exception as exc:
                 LOGGER.warning(
                     "Failed to close browser: %s",
                     exc,
-                    extra={"zip": zip_code},
+                    extra=extra,
                 )
+            LOGGER.info("Resource cleanup complete", extra=extra)
+
+    if playwright is None:
+        async with async_playwright() as auto_playwright:
+            return await _execute(auto_playwright)
+
+    return await _execute(playwright)
