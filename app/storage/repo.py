@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import csv
 import os
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .models_sql import Alert, Item, Observation, Store
@@ -225,6 +225,110 @@ def write_csv(rows: Iterable[dict[str, object]], csv_path: str) -> None:
         os.fsync(handle.fileno())
 
     os.replace(tmp_path, path)
+
+
+def get_clearance_items(session: Session, limit: int = 1000) -> list[Observation]:
+    """Return the most recent clearance observations ordered by deal quality."""
+
+    key_value = func.coalesce(Observation.sku, Observation.product_url)
+    row_number = func.row_number().over(
+        partition_by=(Observation.store_id, key_value),
+        order_by=Observation.ts_utc.desc(),
+    )
+
+    latest = (
+        select(Observation.id.label("id"), row_number.label("rn"))
+        .subquery()
+    )
+
+    stmt = (
+        select(Observation)
+        .join(latest, Observation.id == latest.c.id)
+        .where(latest.c.rn == 1)
+        .where(Observation.clearance.is_(True))
+        .order_by(
+            Observation.pct_off.desc().nullslast(),
+            Observation.price.asc().nullslast(),
+            Observation.ts_utc.desc(),
+        )
+        .limit(limit)
+    )
+
+    return session.scalars(stmt).all()
+
+
+def get_new_clearance_today(session: Session) -> list[Observation]:
+    """Return items that transitioned to clearance within the last 24 hours."""
+
+    key_value = func.coalesce(Observation.sku, Observation.product_url)
+    row_number = func.row_number().over(
+        partition_by=(Observation.store_id, key_value),
+        order_by=Observation.ts_utc.desc(),
+    )
+    prev_clearance = func.lag(Observation.clearance).over(
+        partition_by=(Observation.store_id, key_value),
+        order_by=Observation.ts_utc.desc(),
+    )
+
+    latest = (
+        select(
+            Observation.id.label("id"),
+            row_number.label("rn"),
+            prev_clearance.label("prev_clearance"),
+        )
+        .subquery()
+    )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    stmt = (
+        select(Observation)
+        .join(latest, Observation.id == latest.c.id)
+        .where(latest.c.rn == 1)
+        .where(Observation.clearance.is_(True))
+        .where(Observation.ts_utc >= cutoff)
+        .where(
+            or_(
+                latest.c.prev_clearance.is_(False),
+                latest.c.prev_clearance.is_(None),
+            )
+        )
+        .order_by(
+            Observation.pct_off.desc().nullslast(),
+            Observation.ts_utc.desc(),
+        )
+    )
+
+    return session.scalars(stmt).all()
+
+
+def get_clearance_by_category(session: Session, category: str) -> list[Observation]:
+    """Return clearance observations filtered by category name."""
+
+    key_value = func.coalesce(Observation.sku, Observation.product_url)
+    row_number = func.row_number().over(
+        partition_by=(Observation.store_id, key_value),
+        order_by=Observation.ts_utc.desc(),
+    )
+
+    latest = (
+        select(Observation.id.label("id"), row_number.label("rn"))
+        .subquery()
+    )
+
+    stmt = (
+        select(Observation)
+        .join(latest, Observation.id == latest.c.id)
+        .where(latest.c.rn == 1)
+        .where(Observation.clearance.is_(True))
+        .where(Observation.category == category)
+        .order_by(
+            Observation.pct_off.desc().nullslast(),
+            Observation.price.asc().nullslast(),
+            Observation.ts_utc.desc(),
+        )
+    )
+
+    return session.scalars(stmt).all()
 
 
 def _row_to_values(row: dict[str, object]) -> list[str]:
