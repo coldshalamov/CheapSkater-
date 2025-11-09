@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import csv
 import os
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from .models_sql import Alert, Item, Observation, Store
+from .models_sql import Alert, Item, Observation, Quarantine, Store
 
 CSV_HEADER = [
     "ts_utc",
@@ -28,6 +30,7 @@ CSV_HEADER = [
     "availability",
     "product_url",
     "image_url",
+    "state",
 ]
 
 
@@ -171,6 +174,7 @@ def flatten_for_csv(session: Session) -> list[dict[str, object]]:
             latest.c.store_id,
             func.coalesce(Store.name, latest.c.store_name).label("store_name"),
             func.coalesce(Store.zip, latest.c.zip).label("zip"),
+            Store.state.label("state"),
             latest.c.sku,
             latest.c.title,
             latest.c.category,
@@ -195,6 +199,7 @@ def flatten_for_csv(session: Session) -> list[dict[str, object]]:
                 "store_id": record.store_id,
                 "store_name": record.store_name,
                 "zip": record.zip,
+                "state": record.state,
                 "sku": record.sku,
                 "title": record.title,
                 "category": record.category,
@@ -213,39 +218,32 @@ def write_csv(rows: Iterable[dict[str, object]], csv_path: str) -> None:
     path = Path(csv_path)
     os.makedirs(path.parent, exist_ok=True)
 
-    tmp_path = Path(f"{path}.tmp")
-    os.makedirs(tmp_path.parent, exist_ok=True)
-
-    with tmp_path.open("w", newline="", encoding="utf-8") as handle:
+    with NamedTemporaryFile(
+        mode="w", newline="", encoding="utf-8", dir=str(path.parent), delete=False
+    ) as handle:
         writer = csv.writer(handle)
         writer.writerow(CSV_HEADER)
         for row in rows:
             writer.writerow(_row_to_values(row))
         handle.flush()
         os.fsync(handle.fileno())
+        tmp_name = handle.name
 
-    os.replace(tmp_path, path)
+    os.replace(tmp_name, path)
 
 
-def get_clearance_items(session: Session, limit: int = 1000) -> list[Observation]:
+def get_clearance_items(
+    session: Session,
+    *,
+    state: str | None = None,
+    category: str | None = None,
+    limit: int = 1000,
+) -> list[Observation]:
     """Return the most recent clearance observations ordered by deal quality."""
 
-    key_value = func.coalesce(Observation.sku, Observation.product_url)
-    row_number = func.row_number().over(
-        partition_by=(Observation.store_id, key_value),
-        order_by=Observation.ts_utc.desc(),
-    )
-
-    latest = (
-        select(Observation.id.label("id"), row_number.label("rn"))
-        .subquery()
-    )
-
+    stmt = _latest_observation_query(state=state, category=category)
     stmt = (
-        select(Observation)
-        .join(latest, Observation.id == latest.c.id)
-        .where(latest.c.rn == 1)
-        .where(Observation.clearance.is_(True))
+        stmt.where(Observation.clearance.is_(True))
         .order_by(
             Observation.pct_off.desc().nullslast(),
             Observation.price.asc().nullslast(),
@@ -253,11 +251,15 @@ def get_clearance_items(session: Session, limit: int = 1000) -> list[Observation
         )
         .limit(limit)
     )
-
     return session.scalars(stmt).all()
 
 
-def get_new_clearance_today(session: Session) -> list[Observation]:
+def get_new_clearance_today(
+    session: Session,
+    *,
+    state: str | None = None,
+    category: str | None = None,
+) -> list[Observation]:
     """Return items that transitioned to clearance within the last 24 hours."""
 
     key_value = func.coalesce(Observation.sku, Observation.product_url)
@@ -281,7 +283,7 @@ def get_new_clearance_today(session: Session) -> list[Observation]:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=1)
     stmt = (
-        select(Observation)
+        _latest_observation_query(state=state, category=category)
         .join(latest, Observation.id == latest.c.id)
         .where(latest.c.rn == 1)
         .where(Observation.clearance.is_(True))
@@ -301,34 +303,69 @@ def get_new_clearance_today(session: Session) -> list[Observation]:
     return session.scalars(stmt).all()
 
 
-def get_clearance_by_category(session: Session, category: str) -> list[Observation]:
+def get_clearance_by_category(
+    session: Session,
+    category: str,
+    *,
+    state: str | None = None,
+    limit: int = 1000,
+) -> list[Observation]:
     """Return clearance observations filtered by category name."""
 
-    key_value = func.coalesce(Observation.sku, Observation.product_url)
-    row_number = func.row_number().over(
-        partition_by=(Observation.store_id, key_value),
-        order_by=Observation.ts_utc.desc(),
+    return get_clearance_items(
+        session,
+        state=state,
+        category=category,
+        limit=limit,
     )
 
-    latest = (
-        select(Observation.id.label("id"), row_number.label("rn"))
-        .subquery()
-    )
+
+def get_latest_timestamp(session: Session) -> datetime | None:
+    """Return the most recent observation timestamp."""
+
+    stmt = select(func.max(Observation.ts_utc))
+    return session.scalar(stmt)
+
+
+def list_distinct_categories(session: Session) -> list[str]:
+    """Return sorted list of categories with active clearance inventory."""
 
     stmt = (
-        select(Observation)
-        .join(latest, Observation.id == latest.c.id)
-        .where(latest.c.rn == 1)
+        select(Observation.category)
         .where(Observation.clearance.is_(True))
-        .where(Observation.category == category)
-        .order_by(
-            Observation.pct_off.desc().nullslast(),
-            Observation.price.asc().nullslast(),
-            Observation.ts_utc.desc(),
-        )
+        .distinct()
+        .order_by(Observation.category.asc())
     )
+    return [row[0] for row in session.execute(stmt)]
 
-    return session.scalars(stmt).all()
+
+def insert_quarantine(
+    session: Session,
+    *,
+    retailer: str,
+    store_id: str | None,
+    sku: str | None,
+    zip_code: str | None,
+    state: str | None,
+    category: str | None,
+    reason: str,
+    payload: dict[str, object],
+) -> None:
+    """Persist a quarantine record for inspection."""
+
+    entry = Quarantine(
+        ts_utc=datetime.now(timezone.utc),
+        retailer=retailer,
+        store_id=store_id,
+        sku=sku,
+        zip=zip_code,
+        state=state,
+        category=category,
+        reason=reason,
+        payload=json.dumps(payload, ensure_ascii=False, default=str),
+    )
+    session.add(entry)
+    session.flush()
 
 
 def _row_to_values(row: dict[str, object]) -> list[str]:
@@ -356,4 +393,36 @@ def _row_to_values(row: dict[str, object]) -> list[str]:
         row.get("availability", "") or "",
         row.get("product_url", ""),
         row.get("image_url", "") or "",
+        row.get("state", "") or "",
     ]
+
+
+def _latest_observation_query(
+    *,
+    state: str | None = None,
+    category: str | None = None,
+):
+    key_value = func.coalesce(Observation.sku, Observation.product_url)
+    row_number = func.row_number().over(
+        partition_by=(Observation.store_id, key_value),
+        order_by=Observation.ts_utc.desc(),
+    )
+
+    latest = select(Observation.id.label("id"), row_number.label("rn")).subquery()
+
+    stmt = (
+        select(Observation)
+        .join(latest, Observation.id == latest.c.id)
+        .join(Store, Store.id == Observation.store_id, isouter=True)
+        .where(latest.c.rn == 1)
+    )
+
+    if state:
+        stmt = stmt.where(
+            func.upper(func.coalesce(Store.state, "")) == state.upper()
+        )
+
+    if category:
+        stmt = stmt.where(Observation.category == category)
+
+    return stmt

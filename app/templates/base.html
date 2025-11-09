@@ -10,21 +10,23 @@
 <body>
     <header class="site-header">
         <div class="brand">
-            <a href="/">
+            <a href="/" class="brand-link">
                 <span class="brand-name">CheapSkater</span>
-                <span class="brand-tagline">Lowe's Clearance Insights</span>
+                <span class="brand-tagline">WA &amp; OR Lowe's Clearance</span>
             </a>
         </div>
         <nav class="nav-links" aria-label="Primary navigation">
-            <a href="/" class="nav-link">All Clearance</a>
-            <a href="/new-today" class="nav-link">New Today</a>
+            <a href="/" class="nav-link{% if active_scope == 'all' %} active{% endif %}">All Clearance</a>
+            <a href="/new-today?state=WA" class="nav-link{% if active_scope == 'new' and state == 'WA' %} active{% endif %}">New Today WA</a>
+            <a href="/new-today?state=OR" class="nav-link{% if active_scope == 'new' and state == 'OR' %} active{% endif %}">New Today OR</a>
         </nav>
     </header>
     <main class="site-main">
         {% block content %}{% endblock %}
     </main>
     <footer class="site-footer">
-        <p>Updated with the latest Lowe's clearance findings.</p>
+        <p>Tracking Lowe's building-material clearance for Washington &amp; Oregon.</p>
     </footer>
+    {% block extra_scripts %}{% endblock %}
 </body>
 </html>

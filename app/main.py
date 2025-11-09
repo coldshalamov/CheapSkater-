@@ -31,7 +31,7 @@ from app.errors import PageLoadError, SelectorChangedError, StoreContextError
 from app.extractors import schemas
 from app.extractors.dom_utils import human_wait
 from app.logging_config import get_logger
-from app.retailers.lowes import run_for_zip, set_store_context
+from app.retailers.lowes import run_for_zip
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session
 from app.storage.models_sql import Alert, Observation
@@ -63,11 +63,6 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Discover all WA/OR Lowe's stores and write catalog/wa_or_stores.yml.",
     )
     parser.add_argument(
-        "--probe",
-        action="store_true",
-        help="Set store context, load one category, and exit after reporting card counts.",
-    )
-    parser.add_argument(
         "--zip",
         "--zips",
         dest="zips",
@@ -77,8 +72,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=1,
-        help="Number of ZIP codes to process concurrently (default: 1).",
+        default=3,
+        help="Number of ZIP codes to process concurrently (default: 3).",
     )
     parser.add_argument(
         "--categories",
@@ -221,15 +216,87 @@ def _infer_state_from_zip(zip_code: str | None) -> str:
     return "UNKNOWN"
 
 
+_BUILDING_MATERIAL_KEYWORDS = {
+    "roof",
+    "drywall",
+    "sheetrock",
+    "insulation",
+    "lumber",
+    "plywood",
+    "floor",
+    "tile",
+    "deck",
+    "fence",
+    "concrete",
+    "cement",
+    "mortar",
+    "siding",
+    "door",
+    "window",
+    "trim",
+    "moulding",
+    "paint",
+    "primer",
+    "plumbing",
+    "pipe",
+    "fixture",
+    "electrical",
+    "lighting",
+    "hardware",
+    "tool",
+    "fastener",
+    "cement board",
+    "roofing",
+    "joist",
+    "beam",
+    "stud",
+    "sheathing",
+}
+
+
+def _is_building_material_category(category: str) -> bool:
+    """Return True when *category* is relevant to building materials."""
+
+    normalized = (category or "").strip().lower()
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in _BUILDING_MATERIAL_KEYWORDS)
+
+
+_LOWES_PREFIX_RE = re.compile(r"(?i)^l\s*owe'?s(?:\s+home\s+improvement)?(?:\s+of)?\s*")
+_STATE_SUFFIX_RE = re.compile(r"(?i)\b(?:washington|oregon|wa|or)\b")
+
+
 def _derive_city_from_store_name(store_name: str | None) -> str:
+    """Return a best-effort city name extracted from a Lowe's store label."""
+
     if not store_name:
         return "Unknown"
+
     name = store_name.strip()
-    name = re.sub(r"(?i)^l?.?owe'?s(\s+of)?\s*", "", name)
-    tokens = [t.strip() for t in re.split(r"[-–|,]", name) if t.strip()]
-    if tokens:
-        return tokens[-1]
-    return name or "Unknown"
+    if not name:
+        return "Unknown"
+
+    name = _LOWES_PREFIX_RE.sub("", name)
+    name = re.sub(r"(?i)home\s*center", "", name)
+    name = re.sub(r"(?i)store\s*#?\d+", "", name)
+
+    candidates = [
+        segment.strip()
+        for segment in re.split(r"[|\-/–]|,|\(|\)", name)
+        if segment.strip()
+    ]
+
+    for candidate in candidates:
+        cleaned = _STATE_SUFFIX_RE.sub("", candidate)
+        cleaned = re.sub(r"\d", "", cleaned)
+        cleaned = cleaned.strip()
+        if cleaned:
+            return cleaned.title()
+
+    cleaned_name = _STATE_SUFFIX_RE.sub("", name)
+    cleaned_name = re.sub(r"\d", "", cleaned_name).strip()
+    return cleaned_name.title() if cleaned_name else "Unknown"
 
 
 async def _run_cycle(
@@ -274,7 +341,9 @@ async def _run_cycle(
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
 
-            semaphore = asyncio.Semaphore(args.concurrency or 1)
+            effective_concurrency = max(1, min(args.concurrency or 3, 3))
+            LOGGER.debug("Using concurrency=%s", effective_concurrency)
+            semaphore = asyncio.Semaphore(effective_concurrency)
 
             async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
                 async with semaphore:
@@ -394,108 +463,6 @@ async def _run_cycle(
     return total_items, total_alerts
 
 
-async def _run_probe(
-    args: argparse.Namespace,
-    config: dict[str, Any],
-    categories: list[dict[str, str]],
-) -> None:
-    zips = _resolve_zips(args, config)
-    if not zips:
-        raise RuntimeError("No ZIP codes available for probe.")
-    if not categories:
-        raise RuntimeError("No categories available for probe.")
-
-    target_zip = zips[0]
-    target_category = categories[0]
-    category_url = target_category["url"]
-
-    async with async_playwright() as playwright:
-        user_agent = (os.getenv("USER_AGENT") or "").strip() or None
-        browser = await playwright.chromium.launch(headless=True)
-        context_kwargs: dict[str, Any] = {
-            "viewport": {"width": 1440, "height": 900},
-            "storage_state": None,
-        }
-        if user_agent:
-            context_kwargs["user_agent"] = user_agent
-        context = await browser.new_context(**context_kwargs)
-        page = await context.new_page()
-
-        try:
-            card_count = 0
-            title_count = 0
-            price_count = 0
-            await set_store_context(page, target_zip, user_agent=user_agent)
-            await page.goto(category_url, wait_until="domcontentloaded")
-            await page.wait_for_load_state("networkidle")
-            await human_wait()
-
-            cards = page.locator(selectors.CARD)
-            try:
-                await cards.first.wait_for(state="visible", timeout=15000)
-            except Exception as exc:
-                raise SelectorChangedError(
-                    "Probe failed: product cards missing.",
-                    url=category_url,
-                    zip_code=target_zip,
-                    category=target_category["name"],
-                ) from exc
-
-            card_count = await cards.count()
-            if card_count == 0:
-                raise SelectorChangedError(
-                    "Probe failed: zero product cards.",
-                    url=category_url,
-                    zip_code=target_zip,
-                    category=target_category["name"],
-                )
-
-            title_count = await cards.locator(selectors.TITLE).count()
-            if title_count == 0:
-                raise SelectorChangedError(
-                    "Probe failed: title selector returned zero matches.",
-                    url=category_url,
-                    zip_code=target_zip,
-                    category=target_category["name"],
-                )
-
-            price_count = await cards.locator(selectors.PRICE).count()
-            if price_count == 0:
-                raise SelectorChangedError(
-                    "Probe failed: price selector returned zero matches.",
-                    url=category_url,
-                    zip_code=target_zip,
-                    category=target_category["name"],
-                )
-        finally:
-            try:
-                await context.close()
-            except Exception as exc:
-                LOGGER.warning(
-                    "Failed to close probe context: %s",
-                    exc,
-                    extra={"zip": target_zip},
-                )
-            try:
-                await browser.close()
-            except Exception as exc:
-                LOGGER.warning(
-                    "Failed to close probe browser: %s",
-                    exc,
-                    extra={"zip": target_zip},
-                )
-
-    print(
-        "probe ok | zip={zip} | category={category} | cards={cards} | titles={titles} | prices={prices}".format(
-            zip=target_zip,
-            category=target_category["name"],
-            cards=card_count,
-            titles=title_count,
-            prices=price_count,
-        )
-    )
-
-
 async def _process_row(
     row: dict[str, Any],
     zip_code: str,
@@ -504,22 +471,52 @@ async def _process_row(
     pct_threshold: float,
     abs_map: dict[str, Any],
 ) -> tuple[int, int]:
-    def _coerce_price(value: Any) -> float | None:
+    def _coerce_price(
+        value: Any,
+        field_name: str,
+        *,
+        required: bool,
+    ) -> tuple[float | None, str | None]:
         if value is None:
-            return None
+            return (None, f"missing_{field_name}") if required else (None, None)
         if isinstance(value, (int, float)):
             v = float(value)
-            if v < 0 or v > 100_000:
-                return None
-            return v
-        if isinstance(value, str):
+        elif isinstance(value, str):
             v = schemas.parse_price(value)
             if v is None:
-                return None
-            if v < 0 or v > 100_000:
-                return None
-            return v
-        return None
+                return None, f"invalid_{field_name}_format"
+        else:
+            return None, f"invalid_{field_name}_type"
+
+        if v is None:
+            return None, f"invalid_{field_name}_format"
+        if v < 0.01 or v > 100_000:
+            return None, f"out_of_range_{field_name}"
+        return float(v), None
+
+    def _quarantine_row(reason: str, payload: dict[str, Any]) -> None:
+        try:
+            with session_factory() as quarantine_session:
+                repo.insert_quarantine(
+                    quarantine_session,
+                    retailer="lowes",
+                    store_id=store_id,
+                    sku=canonical_sku,
+                    zip_code=store_zip,
+                    state=store_state,
+                    category=category,
+                    reason=reason,
+                    payload=payload,
+                )
+                quarantine_session.commit()
+        except Exception as exc:
+            LOGGER.exception(
+                "Failed to record quarantine for sku=%s: %s",
+                canonical_sku,
+                exc,
+                extra={"zip": zip_code, "category": category, "url": product_url},
+            )
+            return
 
     def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
         candidate = (raw_sku or "").strip()
@@ -555,9 +552,38 @@ async def _process_row(
     store_zip = row_zip or (zip_code or "").strip() or "00000"
     store_id = store_id_raw or f"zip:{store_zip}"
     store_name = store_name_raw or f"Lowe's {store_zip}"
+    store_state = _infer_state_from_zip(store_zip)
 
-    price = _coerce_price(row.get("price"))
-    price_was = _coerce_price(row.get("price_was"))
+    if not _is_building_material_category(category):
+        LOGGER.debug(
+            "Skipping non-building-material category",
+            extra={
+                "zip": zip_code,
+                "category": category,
+                "sku": canonical_sku,
+            },
+        )
+        return 0, 0
+
+    price, price_reason = _coerce_price(row.get("price"), "price", required=True)
+    if price_reason:
+        _quarantine_row(price_reason, {"row": row})
+        return 0, 0
+
+    price_was, price_was_reason = _coerce_price(
+        row.get("price_was"), "price_was", required=False
+    )
+    if price_was_reason:
+        LOGGER.debug(
+            "price_was invalid; defaulting to None",
+            extra={
+                "zip": zip_code,
+                "category": category,
+                "sku": canonical_sku,
+                "reason": price_was_reason,
+            },
+        )
+        price_was = None
     availability = (row.get("availability") or None)
     if isinstance(availability, str):
         availability = availability.strip() or None
@@ -599,7 +625,7 @@ async def _process_row(
                 store_name,
                 zip_code=store_zip,
                 city=_derive_city_from_store_name(store_name),
-                state=_infer_state_from_zip(store_zip),
+                state=store_state,
             )
             last_obs = repo.get_last_observation(session, store_id, sku, product_url)
             repo.upsert_item(
@@ -775,9 +801,8 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
     LOGGER.info(
-        "Parsed arguments: once=%s probe=%s discover_categories=%s discover_stores=%s concurrency=%s zips=%s categories_pattern=%s",
+        "Parsed arguments: once=%s discover_categories=%s discover_stores=%s concurrency=%s zips=%s categories_pattern=%s",
         args.once,
-        args.probe,
         args.discover_categories,
         args.discover_stores,
         args.concurrency,
@@ -839,10 +864,6 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     categories = _filter_categories(catalog_categories, getattr(args, "categories_pattern", None))
     if not categories:
         raise RuntimeError("No categories matched the provided filter.")
-
-    if args.probe:
-        await _run_probe(args, config, categories)
-        return
 
     engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
     init_db(engine)
