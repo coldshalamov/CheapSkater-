@@ -9,10 +9,12 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 import re
+import threading
 import time
 from typing import Any, Iterable
 
 import requests
+import uvicorn
 import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -83,6 +85,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         dest="categories_filter",
         type=str,
         help="Regex/substring filter applied to catalog category names (case-insensitive).",
+    )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Start the FastAPI dashboard on port 8000 while the scraper runs.",
     )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -858,6 +865,9 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 
     scheduler = AsyncIOScheduler()
 
+    dashboard_thread: threading.Thread | None = None
+    dashboard_server: uvicorn.Server | None = None
+
     async def scheduled_cycle() -> None:
         try:
             await _run_cycle(args, config, categories, session_factory, notifier)
@@ -868,12 +878,42 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     scheduler.start()
     LOGGER.info("Scheduler started with interval=%s minutes", interval_minutes)
 
+    if args.dashboard:
+        config = uvicorn.Config(
+            "app.dashboard:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=False,
+            log_config=None,
+        )
+        dashboard_server = uvicorn.Server(config)
+
+        def run_dashboard() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(dashboard_server.serve())
+            finally:
+                loop.close()
+
+        dashboard_thread = threading.Thread(
+            target=run_dashboard,
+            name="dashboard-server",
+            daemon=True,
+        )
+        dashboard_thread.start()
+        print("Dashboard running at http://localhost:8000")
+
     try:
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
         LOGGER.info("Shutdown signal received; stopping scheduler")
     finally:
         scheduler.shutdown(wait=False)
+        if dashboard_server is not None:
+            dashboard_server.should_exit = True
+        if dashboard_thread is not None:
+            dashboard_thread.join(timeout=5)
 
 
 def main() -> None:
