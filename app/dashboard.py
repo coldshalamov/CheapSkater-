@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 from io import BytesIO
 from pathlib import Path
+import time
 from typing import Any, Iterable, Literal
 
-from fastapi import Depends, FastAPI, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
@@ -27,7 +28,8 @@ TEMPLATES_DIR = BASE_PATH / "templates"
 STATIC_DIR = BASE_PATH / "static"
 DATABASE_FILE = Path(__file__).resolve().parent.parent / "orwa_lowes.sqlite"
 
-engine = get_engine(str(DATABASE_FILE))
+DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
+engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
 init_db(engine)
 session_factory = make_session(engine)
 
@@ -35,6 +37,20 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app = FastAPI(title="CheapSkater Clearance Dashboard")
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+_STATS_CACHE: dict[str, Any] | None = None
+_STATS_CACHE_TS: float | None = None
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: HTTPException) -> PlainTextResponse:
+    if STATIC_DIR.exists():
+        detail = exc.detail if isinstance(exc.detail, str) else "Not Found"
+        return PlainTextResponse(detail, status_code=404)
+    return PlainTextResponse(
+        "CheapSkater Dashboard UI unavailable.\n"
+        "Use: /api/clearance, /api/stats, /healthz",
+        status_code=404,
+    )
 
 Scope = Literal["all", "new"]
 STATE_OPTIONS = ["ALL", "WA", "OR"]
@@ -57,6 +73,23 @@ def get_session() -> Iterable[Session]:
 
     with session_factory() as session:
         yield session
+
+
+def _cache_stats(session: Session) -> dict[str, Any]:
+    global _STATS_CACHE, _STATS_CACHE_TS
+    now = time.monotonic()
+    if _STATS_CACHE and _STATS_CACHE_TS and (now - _STATS_CACHE_TS) < 60:
+        return _STATS_CACHE
+    total_items = repo.count_observations(session)
+    quarantine_total = repo.count_quarantine(session)
+    last_scrape = repo.get_latest_timestamp(session)
+    payload = {
+        "total_items": total_items,
+        "quarantine_count": quarantine_total,
+        "last_scrape": last_scrape.isoformat() if last_scrape else None,
+    }
+    _STATS_CACHE, _STATS_CACHE_TS = payload, now
+    return payload
 
 
 def _serialize_observation(obs: Observation) -> dict[str, Any]:
@@ -315,6 +348,14 @@ def api_clearance(
             "category": normalized_category,
         }
     )
+
+
+@app.get("/api/stats")
+def api_stats(session: Session = Depends(get_session)) -> JSONResponse:
+    """Return aggregate stats for dashboard clients."""
+
+    payload = _cache_stats(session)
+    return JSONResponse(content=payload)
 
 
 if __name__ == "__main__":

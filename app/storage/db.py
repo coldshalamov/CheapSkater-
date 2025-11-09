@@ -9,14 +9,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from .models_sql import Base
 
 
-def get_engine(sqlite_path: str) -> Engine:
+def get_engine(sqlite_path: str, *, busy_timeout: int | float | None = None) -> Engine:
     """Create a SQLAlchemy engine for the SQLite database."""
 
+    timeout_value = float(busy_timeout) if busy_timeout is not None else 30.0
+
     return create_engine(
-        f"sqlite:///{sqlite_path}?timeout=30",
+        f"sqlite:///{sqlite_path}?timeout={timeout_value}",
         future=True,
         pool_pre_ping=True,
-        connect_args={"check_same_thread": False, "timeout": 30},
+        connect_args={"check_same_thread": False, "timeout": timeout_value},
     )
 
 

@@ -320,6 +320,16 @@ def get_clearance_by_category(
     )
 
 
+def count_observations(session: Session) -> int:
+    stmt = select(func.count(Observation.id))
+    return int(session.scalar(stmt) or 0)
+
+
+def count_quarantine(session: Session) -> int:
+    stmt = select(func.count(Quarantine.id))
+    return int(session.scalar(stmt) or 0)
+
+
 def get_latest_timestamp(session: Session) -> datetime | None:
     """Return the most recent observation timestamp."""
 
@@ -366,6 +376,25 @@ def insert_quarantine(
     )
     session.add(entry)
     session.flush()
+
+
+def list_quarantined_categories(
+    session: Session,
+    *,
+    retailer: str,
+    reason: str | None = None,
+) -> list[str]:
+    """Return sorted list of quarantined category names for *retailer*."""
+
+    stmt = select(Quarantine.category).where(Quarantine.retailer == retailer)
+    if reason:
+        stmt = stmt.where(Quarantine.reason == reason)
+    categories = {
+        (row[0] or "").strip()
+        for row in session.execute(stmt)
+        if (row[0] or "").strip()
+    }
+    return sorted(categories)
 
 
 def cleanup_quarantine(session: Session, *, days: int = 30) -> int:

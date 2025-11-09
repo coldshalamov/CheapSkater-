@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -97,6 +100,136 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+SELECTOR_VALIDATION_URL = "https://www.lowes.com/"
+
+
+@dataclass
+class ProcessingStats:
+    processed: int = 0
+    valid: int = 0
+    quarantined: int = 0
+    duplicates: int = 0
+    reasons: Counter[str] = field(default_factory=Counter)
+
+
+async def validate_selectors() -> dict[str, Any]:
+    """Validate known selectors against the Lowe's homepage."""
+
+    counts: dict[str, int] = {}
+    errors: list[str] = []
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
+        page = await browser.new_page()
+        try:
+            await page.goto(SELECTOR_VALIDATION_URL, wait_until="networkidle")
+            await human_wait(0.5, 1.5)
+        except Exception as exc:  # pragma: no cover - network issues
+            message = (
+                f"Failed to load {SELECTOR_VALIDATION_URL}: {exc}"
+            )
+            LOGGER.error(message)
+            errors.append(message)
+            try:
+                await browser.close()
+            finally:
+                return {"counts": counts, "errors": errors}
+
+        try:
+            for name in dir(selectors):
+                if not name.isupper():
+                    continue
+                selector_value = getattr(selectors, name)
+                if not isinstance(selector_value, str):
+                    continue
+                try:
+                    count = await page.locator(selector_value).count()
+                    counts[name] = count
+                    if count == 0:
+                        message = (
+                            f"Selector '{name}' returned 0 matches at {SELECTOR_VALIDATION_URL}"
+                        )
+                        LOGGER.error(message)
+                        errors.append(message)
+                except Exception as exc:  # pragma: no cover - selector issues
+                    counts[name] = 0
+                    error_message = (
+                        f"Selector '{name}' evaluation failed: {exc}"
+                    )
+                    LOGGER.exception(
+                        "Selector '%s' evaluation failed", name, exc_info=exc
+                    )
+                    errors.append(error_message)
+        finally:
+            try:
+                await browser.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    return {"counts": counts, "errors": errors}
+
+
+def _increment_quarantine(stats: ProcessingStats, label: str) -> None:
+    stats.quarantined += 1
+    stats.reasons[label] += 1
+
+
+def _format_quarantine_summary(reasons: Counter[str], total: int) -> str:
+    if total <= 0:
+        return "Quarantined: 0 items"
+    parts = [f"{count} {label}" for label, count in reasons.most_common()]
+    return f"Quarantined: {total} items ({', '.join(parts)})"
+
+
+def _record_selector_quarantine(
+    session_factory,
+    stats: ProcessingStats,
+    *,
+    zip_code: str,
+    category: str | None,
+    url: str | None,
+    error: Exception,
+    dry_run: bool,
+) -> None:
+    _increment_quarantine(stats, "selector changed")
+    if dry_run:
+        return
+
+    session = None
+    try:
+        session = session_factory()
+        repo.insert_quarantine(
+            session,
+            retailer="lowes",
+            store_id=None,
+            sku=None,
+            zip_code=zip_code,
+            state=_infer_state_from_zip(zip_code),
+            category=category,
+            reason="selector_changed",
+            payload={
+                "error": str(error),
+                "url": url,
+                "category": category,
+                "zip": zip_code,
+            },
+        )
+        session.commit()
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning(
+            "Failed to record selector quarantine | zip=%s | category=%s | error=%s",
+            zip_code,
+            category or "unknown",
+            exc,
+        )
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        finally:
+            LOGGER.debug("Session closed")
+
+
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for the application."""
 
@@ -146,6 +279,16 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--dashboard",
         action="store_true",
         help="Start the FastAPI dashboard on port 8000 while the scraper runs.",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run the pipeline without persisting data to the database.",
+    )
+    parser.add_argument(
+        "--ignore-quarantine",
+        action="store_true",
+        help="Retry categories that were previously quarantined.",
     )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -316,6 +459,28 @@ def _infer_state_from_zip(zip_code: str | None) -> str:
     return "UNKNOWN"
 
 
+def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
+    candidate = (raw_sku or "").strip()
+    if candidate:
+        return candidate
+    match = re.search(r"(\d{5,})", product_url)
+    return match.group(1) if match else None
+
+
+def _normalize_product_url(product_url: str | None) -> str:
+    url = (product_url or "").strip()
+    if url.startswith("/"):
+        url = f"https://www.lowes.com{url}"
+    return url
+
+
+def _extract_identifiers(row: dict[str, Any]) -> tuple[str | None, str]:
+    product_url = _normalize_product_url(row.get("product_url"))
+    sku = _derive_sku(row.get("sku"), product_url)
+    canonical = sku or (product_url or None)
+    return canonical, product_url
+
+
 _BUILDING_MATERIAL_KEYWORDS = {
     "roof",
     "drywall",
@@ -431,6 +596,8 @@ async def _run_cycle(
     start = time.monotonic()
     total_items = 0
     total_alerts = 0
+    stats = ProcessingStats()
+    dry_run = bool(getattr(args, "validate", False) or getattr(args, "probe", False))
 
     zips = _resolve_zips(args, config)
 
@@ -438,8 +605,49 @@ async def _run_cycle(
         LOGGER.warning("No ZIP codes configured; skipping cycle")
         return total_items, total_alerts
 
-    if not categories:
+    categories_to_use = list(categories)
+    if not categories_to_use:
         LOGGER.warning("No categories available; skipping cycle")
+        return total_items, total_alerts
+
+    if not getattr(args, "ignore_quarantine", False):
+        session = None
+        quarantined_categories: set[str] = set()
+        try:
+            session = session_factory()
+            quarantined_categories = set(
+                repo.list_quarantined_categories(
+                    session, retailer="lowes", reason="selector_changed"
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("Failed to load quarantined categories: %s", exc)
+        finally:
+            try:
+                if session is not None:
+                    session.close()
+            finally:
+                LOGGER.debug("Session closed")
+
+        if quarantined_categories:
+            filtered_categories = [
+                entry
+                for entry in categories_to_use
+                if entry.get("name") not in quarantined_categories
+            ]
+            skipped = len(categories_to_use) - len(filtered_categories)
+            if skipped > 0:
+                LOGGER.info(
+                    "Skipping %d quarantined categories: %s",
+                    skipped,
+                    ", ".join(sorted(quarantined_categories)),
+                )
+            categories_to_use = filtered_categories
+
+    if not categories_to_use:
+        LOGGER.warning(
+            "No categories available after quarantine filtering; skipping cycle"
+        )
         return total_items, total_alerts
 
     pct_threshold = _get_pct_threshold(config)
@@ -454,15 +662,26 @@ async def _run_cycle(
     LOGGER.info(
         "Starting run cycle | retailer=lowes | zips=%d | categories=%d",
         len(zips),
-        len(categories),
+        len(categories_to_use),
     )
 
     any_zip_success = False
 
     try:
         if args.probe:
+            validation = await validate_selectors()
+            card_count = validation["counts"].get("CARD", 0)
+            if validation["errors"]:
+                print(
+                    json.dumps(
+                        {"status": "scrape_error", "reason": "selector_validation"},
+                        ensure_ascii=False,
+                    )
+                )
+                return 0, 0
+
             target_zip = zips[0]
-            target_category = categories[0]
+            target_category = categories_to_use[0]
             category_name = target_category.get("name", "unknown")
             LOGGER.info(
                 "Probe mode | zip=%s | category=%s",
@@ -487,6 +706,12 @@ async def _run_cycle(
                             target_zip,
                             exc,
                         )
+                        print(
+                            json.dumps(
+                                {"status": "scrape_error", "reason": "store_context"},
+                                ensure_ascii=False,
+                            )
+                        )
                         return 0, 0
                     except SelectorChangedError as exc:
                         LOGGER.error(
@@ -495,6 +720,21 @@ async def _run_cycle(
                             getattr(exc, "category", category_name),
                             getattr(exc, "url", "unknown"),
                             exc,
+                        )
+                        _record_selector_quarantine(
+                            session_factory,
+                            stats,
+                            zip_code=target_zip,
+                            category=getattr(exc, "category", None),
+                            url=getattr(exc, "url", None),
+                            error=exc,
+                            dry_run=True,
+                        )
+                        print(
+                            json.dumps(
+                                {"status": "scrape_error", "reason": "selector_changed"},
+                                ensure_ascii=False,
+                            )
                         )
                         return 0, 0
                     except PageLoadError as exc:
@@ -505,6 +745,12 @@ async def _run_cycle(
                             getattr(exc, "url", "unknown"),
                             exc,
                         )
+                        print(
+                            json.dumps(
+                                {"status": "scrape_error", "reason": "page_load"},
+                                ensure_ascii=False,
+                            )
+                        )
                         return 0, 0
 
                     if not rows:
@@ -513,11 +759,26 @@ async def _run_cycle(
                             target_zip,
                             category_name,
                         )
+                        print(
+                            json.dumps(
+                                {"status": "scrape_error", "reason": "empty"},
+                                ensure_ascii=False,
+                            )
+                        )
                         return 0, 0
 
                     processed_items = 0
                     processed_alerts = 0
+                    seen_keys: set[tuple[str, str | None]] = set()
                     for row in rows[:5]:
+                        stats.processed += 1
+                        canonical, _ = _extract_identifiers(row)
+                        key = (target_zip, canonical)
+                        if canonical and key in seen_keys:
+                            stats.duplicates += 1
+                            continue
+                        if canonical:
+                            seen_keys.add(key)
                         items, alerts = await _process_row(
                             row,
                             target_zip,
@@ -525,6 +786,8 @@ async def _run_cycle(
                             notifier,
                             pct_threshold,
                             abs_map,
+                            stats=stats,
+                            dry_run=True,
                         )
                         processed_items += items
                         processed_alerts += alerts
@@ -537,6 +800,16 @@ async def _run_cycle(
                         processed_items,
                         processed_alerts,
                     )
+                    print(
+                        json.dumps(
+                            {
+                                "status": "ok",
+                                "items": processed_items,
+                                "alerts": processed_alerts,
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
                     return processed_items, processed_alerts
                 finally:
                     try:
@@ -547,8 +820,17 @@ async def _run_cycle(
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
 
-            effective_concurrency = max(1, min(args.concurrency or 3, 3))
-            LOGGER.debug("Using concurrency=%s", effective_concurrency)
+            raw_max = config.get("max_concurrency", 3)
+            try:
+                configured_max = int(raw_max)
+            except (TypeError, ValueError):
+                configured_max = 3
+            if configured_max <= 0:
+                configured_max = 3
+
+            desired = args.concurrency or configured_max
+            effective_concurrency = max(1, min(desired, configured_max))
+            LOGGER.debug("Using concurrency=%s (max=%s)", effective_concurrency, configured_max)
             semaphore = asyncio.Semaphore(effective_concurrency)
 
             async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
@@ -558,7 +840,7 @@ async def _run_cycle(
                         rows = await run_for_zip(
                             playwright,
                             zip_code,
-                            categories,
+                            categories_to_use,
                             clearance_threshold=pct_threshold,
                             browser=browser,
                         )
@@ -583,6 +865,15 @@ async def _run_cycle(
                             extra["url"] or "unknown",
                             exc,
                             extra=extra,
+                        )
+                        _record_selector_quarantine(
+                            session_factory,
+                            stats,
+                            zip_code=zip_code,
+                            category=extra["category"],
+                            url=extra["url"],
+                            error=exc,
+                            dry_run=dry_run,
                         )
                         return 0, 0, False
                     except PageLoadError as exc:
@@ -619,7 +910,16 @@ async def _run_cycle(
 
                     items = 0
                     alerts = 0
+                    seen_keys: set[tuple[str, str | None]] = set()
                     for row in rows:
+                        stats.processed += 1
+                        canonical, _ = _extract_identifiers(row)
+                        key = (zip_code, canonical)
+                        if canonical and key in seen_keys:
+                            stats.duplicates += 1
+                            continue
+                        if canonical:
+                            seen_keys.add(key)
                         processed = await _process_row(
                             row,
                             zip_code,
@@ -627,6 +927,8 @@ async def _run_cycle(
                             notifier,
                             pct_threshold,
                             abs_map,
+                            stats=stats,
+                            dry_run=dry_run,
                         )
                         items += processed[0]
                         alerts += processed[1]
@@ -648,8 +950,23 @@ async def _run_cycle(
     finally:
         duration = time.monotonic() - start
 
+    LOGGER.info(
+        "Processed %d rows: %d valid, %d quarantined, %d duplicates",
+        stats.processed,
+        stats.valid,
+        stats.quarantined,
+        stats.duplicates,
+    )
+    if stats.quarantined:
+        summary = _format_quarantine_summary(stats.reasons, stats.quarantined)
+        LOGGER.info(summary)
+        if stats.processed and stats.quarantined / max(stats.processed, 1) > 0.1:
+            rate = (stats.quarantined / stats.processed) * 100 if stats.processed else 0.0
+            LOGGER.warning("High quarantine rate detected: %.1f%%", rate)
+
     if any_zip_success:
-        _export_csv(config, session_factory)
+        if not dry_run:
+            _export_csv(config, session_factory)
         _ping_healthcheck(config)
         LOGGER.info(
             "cycle ok | retailer=lowes | zips=%d | items=%d | alerts=%d | duration=%.1fs",
@@ -676,6 +993,9 @@ async def _process_row(
     notifier: Notifier,
     pct_threshold: float,
     abs_map: dict[str, Any],
+    *,
+    stats: ProcessingStats,
+    dry_run: bool,
 ) -> tuple[int, int]:
     def _coerce_price(
         value: Any,
@@ -700,7 +1020,14 @@ async def _process_row(
             return None, f"out_of_range_{field_name}"
         return float(v), None
 
-    def _quarantine_row(reason: str, payload: dict[str, Any]) -> None:
+    def _quarantine_row(
+        reason: str, payload: dict[str, Any], *, summary_label: str | None = None
+    ) -> None:
+        label = summary_label or reason.replace("_", " ")
+        _increment_quarantine(stats, label)
+        if dry_run:
+            return
+
         session = None
         try:
             session = session_factory()
@@ -716,14 +1043,13 @@ async def _process_row(
                 payload=payload,
             )
             session.commit()
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - defensive
             LOGGER.exception(
                 "Failed to record quarantine for sku=%s: %s",
                 canonical_sku,
                 exc,
                 extra={"zip": zip_code, "category": category, "url": product_url},
             )
-            return
         finally:
             try:
                 if session is not None:
@@ -731,24 +1057,15 @@ async def _process_row(
             finally:
                 LOGGER.debug("Session closed")
 
-    def _derive_sku(raw_sku: str | None, product_url: str) -> str | None:
-        candidate = (raw_sku or "").strip()
-        if candidate:
-            return candidate
-        match = re.search(r"(\d{5,})", product_url)
-        return match.group(1) if match else None
-
     title = (row.get("title") or "").strip()
     category = (row.get("category") or "").strip() or "Uncategorised"
-    product_url = (row.get("product_url") or "").strip()
-    if product_url.startswith("/"):
-        product_url = f"https://www.lowes.com{product_url}"
-    sku = _derive_sku(row.get("sku"), product_url)
+    canonical_sku, product_url = _extract_identifiers(row)
+    product_url = product_url or ""
     image_url = (row.get("image_url") or None)
     if isinstance(image_url, str):
         image_url = image_url.strip() or None
 
-    canonical_sku = sku or product_url
+    canonical_sku = canonical_sku or product_url
 
     if not title or not product_url or not canonical_sku:
         LOGGER.debug(
@@ -780,7 +1097,7 @@ async def _process_row(
 
     price, price_reason = _coerce_price(row.get("price"), "price", required=True)
     if price_reason:
-        _quarantine_row(price_reason, {"row": row})
+        _quarantine_row(price_reason, {"row": row}, summary_label="price errors")
         return 0, 0
 
     price_was, price_was_reason = _coerce_price(
@@ -833,23 +1150,8 @@ async def _process_row(
     session = None
     try:
         session = session_factory()
-        repo.upsert_store(
-            session,
-            store_id,
-            store_name,
-            zip_code=store_zip,
-            city=_derive_city_from_store_name(store_name),
-            state=store_state,
-        )
-        last_obs = repo.get_last_observation(session, store_id, sku, product_url)
-        repo.upsert_item(
-            session,
-            canonical_sku,
-            "lowes",
-            title,
-            category,
-            product_url,
-            image_url=image_url,
+        last_obs = repo.get_last_observation(
+            session, store_id, canonical_sku, product_url
         )
         obs_model = Observation(
             ts_utc=ts_now,
@@ -868,8 +1170,27 @@ async def _process_row(
             clearance=clearance_flag,
             availability=availability,
         )
-        repo.insert_observation(session, obs_model)
-        session.commit()
+
+        if not dry_run:
+            repo.upsert_store(
+                session,
+                store_id,
+                store_name,
+                zip_code=store_zip,
+                city=_derive_city_from_store_name(store_name),
+                state=store_state,
+            )
+            repo.upsert_item(
+                session,
+                canonical_sku,
+                "lowes",
+                title,
+                category,
+                product_url,
+                image_url=image_url,
+            )
+            repo.insert_observation(session, obs_model)
+            session.commit()
 
         new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
         triggered: list[str] = []
@@ -910,17 +1231,22 @@ async def _process_row(
                 price_was=obs_model.price_was,
                 note=f"zip={store_zip}",
             )
-            repo.insert_alert(session, alert)
-            session.commit()
-            try:
-                notifier.notify_new_clearance(obs_model)
-            except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.error(
-                    "Notifier failed for clearance (sku=%s): %s",
-                    canonical_sku,
-                    exc,
-                    extra={"zip": zip_code, "category": category, "url": product_url},
-                )
+            if not dry_run:
+                repo.insert_alert(session, alert)
+                session.commit()
+                try:
+                    notifier.notify_new_clearance(obs_model)
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.error(
+                        "Notifier failed for clearance (sku=%s): %s",
+                        canonical_sku,
+                        exc,
+                        extra={
+                            "zip": zip_code,
+                            "category": category,
+                            "url": product_url,
+                        },
+                    )
             alerts_created += 1
 
         if price_drop and last_obs is not None:
@@ -943,17 +1269,22 @@ async def _process_row(
                 price_was=last_obs.price,
                 note=f"zip={store_zip}",
             )
-            repo.insert_alert(session, alert)
-            session.commit()
-            try:
-                notifier.notify_price_drop(obs_model, last_obs)
-            except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.error(
-                    "Notifier failed for price drop (sku=%s): %s",
-                    canonical_sku,
-                    exc,
-                    extra={"zip": zip_code, "category": category, "url": product_url},
-                )
+            if not dry_run:
+                repo.insert_alert(session, alert)
+                session.commit()
+                try:
+                    notifier.notify_price_drop(obs_model, last_obs)
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.error(
+                        "Notifier failed for price drop (sku=%s): %s",
+                        canonical_sku,
+                        exc,
+                        extra={
+                            "zip": zip_code,
+                            "category": category,
+                            "url": product_url,
+                        },
+                    )
             alerts_created += 1
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.exception(
@@ -970,6 +1301,7 @@ async def _process_row(
         finally:
             LOGGER.debug("Session closed")
 
+    stats.valid += 1
     return 1, alerts_created
 
 
@@ -1027,8 +1359,10 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
 
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.validate:
+        args.once = True
     LOGGER.info(
-        "Parsed arguments: once=%s discover_categories=%s discover_stores=%s concurrency=%s zips=%s categories_pattern=%s",
+        "Parsed arguments: once=%s discover_categories=%s discover_stores=%s concurrency=%s zips=%s categories_pattern=%s validate=%s ignore_quarantine=%s",
         args.once,
         args.discover_categories,
         args.discover_stores,
@@ -1037,6 +1371,8 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         getattr(args, "categories_pattern", None).pattern  # type: ignore[attr-defined]
         if getattr(args, "categories_pattern", None)
         else None,
+        args.validate,
+        args.ignore_quarantine,
     )
 
     load_dotenv()
@@ -1094,8 +1430,11 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         raise RuntimeError("No categories matched the provided filter.")
 
     engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
-    init_db_safe(engine)
-    LOGGER.info("Database initialized (existing tables preserved)")
+    if args.validate:
+        LOGGER.info("Validate mode: skipping database schema initialisation")
+    else:
+        init_db_safe(engine)
+        LOGGER.info("Database initialized (existing tables preserved)")
     session_factory = make_session(engine)
 
     notifier = Notifier()
@@ -1113,7 +1452,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     except (TypeError, ValueError):
         retention_days = 30
 
-    if retention_days > 0:
+    if retention_days > 0 and not args.validate:
         if check_quarantine_table(engine):
             session = None
             try:
@@ -1135,6 +1474,8 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
                     LOGGER.debug("Session closed")
         else:
             LOGGER.info("Quarantine cleanup skipped: quarantine table missing")
+    elif args.validate:
+        LOGGER.info("Validate mode: skipping quarantine cleanup")
 
     if args.once or args.probe:
         return
