@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -209,7 +210,9 @@ def export_excel(
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
-    items = _select_items(session, scope=scope, state=normalized_state, category=normalized_category)
+    items = _select_items(
+        session, scope=scope, state=normalized_state, category=normalized_category
+    )
 
     workbook = Workbook()
     sheet = workbook.active
@@ -229,6 +232,13 @@ def export_excel(
         "URL",
     ]
     sheet.append(headers)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="004990", end_color="004990", fill_type="solid")
+    for cell in sheet[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+
+    sheet.freeze_panes = "A2"
 
     for item in items:
         pct_off = item.pct_off * 100 if item.pct_off is not None else None
@@ -248,6 +258,19 @@ def export_excel(
                 item.product_url,
             ]
         )
+
+    for column_cells in sheet.iter_cols(
+        min_row=1, max_row=sheet.max_row, max_col=sheet.max_column
+    ):
+        max_length = 0
+        for cell in column_cells:
+            if cell.value is None:
+                continue
+            max_length = max(max_length, len(str(cell.value)))
+        if max_length <= 0:
+            continue
+        column_letter = column_cells[0].column_letter
+        sheet.column_dimensions[column_letter].width = min(max_length + 2, 50)
 
     buffer = BytesIO()
     workbook.save(buffer)

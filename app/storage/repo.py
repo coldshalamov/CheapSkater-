@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterable
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from .models_sql import Alert, Item, Observation, Quarantine, Store
@@ -366,6 +366,18 @@ def insert_quarantine(
     )
     session.add(entry)
     session.flush()
+
+
+def cleanup_quarantine(session: Session, *, days: int = 30) -> int:
+    """Remove quarantine records older than *days* days."""
+
+    if days <= 0:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = delete(Quarantine).where(Quarantine.ts_utc < cutoff)
+    result = session.execute(stmt)
+    return int(result.rowcount or 0)
 
 
 def _row_to_values(row: dict[str, object]) -> list[str]:
