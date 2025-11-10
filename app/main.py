@@ -7,7 +7,7 @@ import asyncio
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -16,6 +16,10 @@ import re
 import threading
 import time
 from typing import Any, Iterable
+import random
+import shutil
+import sqlite3
+import sys
 
 import requests
 import uvicorn
@@ -23,6 +27,7 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 from app.catalog.discover_lowes import (
     discover_categories,
@@ -43,6 +48,10 @@ import app.selectors as selectors
 
 
 LOGGER = get_logger(__name__)
+
+
+class PreflightError(RuntimeError):
+    """Raised when the environment is not ready for scraping."""
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -169,6 +178,97 @@ async def validate_selectors() -> dict[str, Any]:
     return {"counts": counts, "errors": errors}
 
 
+def preflight_check(config: dict[str, Any]) -> None:
+    """Validate environment prerequisites prior to running a scrape."""
+
+    errors: list[str] = []
+
+    required_paths: set[Path] = {Path("requirements.txt")}
+    retailers = config.get("retailers", {})
+    lowes_conf = retailers.get("lowes", {})
+
+    catalog_path_value = lowes_conf.get("catalog_path")
+    if catalog_path_value:
+        required_paths.add(_resolve_config_path(catalog_path_value))
+    zips_path_value = lowes_conf.get("zips_path")
+    if zips_path_value:
+        required_paths.add(_resolve_config_path(zips_path_value))
+
+    for path in sorted(required_paths):
+        if not path.exists():
+            errors.append(f"Required file missing: {path}")
+
+    selector_errors: list[str] = []
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                html_content = "<html><body></body></html>"
+                page.set_content(html_content)
+                for name in dir(selectors):
+                    if not name.isupper():
+                        continue
+                    selector_value = getattr(selectors, name)
+                    if not isinstance(selector_value, str) or not selector_value.strip():
+                        continue
+                    try:
+                        page.query_selector_all(selector_value)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        selector_errors.append(
+                            f"Selector '{name}' is not valid CSS: {exc}"
+                        )
+            finally:
+                browser.close()
+    except Exception as exc:  # pragma: no cover - defensive
+        selector_errors.append(f"Selector validation failed: {exc}")
+
+    errors.extend(selector_errors)
+
+    sqlite_target = _resolve_config_path(
+        config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite")
+    )
+    sqlite_target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        connection = sqlite3.connect(sqlite_target)
+        try:
+            connection.execute("PRAGMA journal_mode")
+        finally:
+            connection.close()
+    except Exception as exc:
+        errors.append(f"SQLite database not writable at {sqlite_target}: {exc}")
+
+    try:
+        response = requests.get("https://www.lowes.com/", timeout=5)
+        if response.status_code >= 400:
+            errors.append(
+                "Network check to https://www.lowes.com/ returned "
+                f"HTTP {response.status_code}"
+            )
+    except Exception as exc:  # pragma: no cover - network failures
+        errors.append(f"Unable to reach https://www.lowes.com/: {exc}")
+
+    try:
+        disk_path = sqlite_target.parent if sqlite_target.parent.exists() else Path.cwd()
+        disk_usage = shutil.disk_usage(disk_path)
+        if disk_usage.free < 1_000_000_000:
+            errors.append(
+                f"Insufficient free disk space at {disk_path} "
+                f"({disk_usage.free / (1024 ** 3):.2f} GiB available)"
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        errors.append(f"Unable to determine free disk space: {exc}")
+
+    if sys.version_info < (3, 11):
+        errors.append(
+            "Python 3.11 or newer is required. "
+            f"Detected {sys.version_info.major}.{sys.version_info.minor}"
+        )
+
+    if errors:
+        raise PreflightError("; ".join(errors))
+
+
 def _increment_quarantine(stats: ProcessingStats, label: str) -> None:
     stats.quarantined += 1
     stats.reasons[label] += 1
@@ -179,6 +279,89 @@ def _format_quarantine_summary(reasons: Counter[str], total: int) -> str:
         return "Quarantined: 0 items"
     parts = [f"{count} {label}" for label, count in reasons.most_common()]
     return f"Quarantined: {total} items ({', '.join(parts)})"
+
+
+def generate_test_data(session_factory, *, item_count: int = 100) -> None:
+    """Populate the database with synthetic observations for testing."""
+
+    session = None
+    stores = [
+        ("wa-seattle", "Lowe's of Seattle", "98101", "Seattle", "WA"),
+        ("wa-bellevue", "Lowe's of Bellevue", "98004", "Bellevue", "WA"),
+        ("or-portland", "Lowe's of Portland", "97204", "Portland", "OR"),
+        ("or-salem", "Lowe's of Salem", "97301", "Salem", "OR"),
+    ]
+    categories = [
+        "Roofing",
+        "Lumber",
+        "Flooring",
+        "Plumbing",
+        "Electrical",
+        "Hardware",
+    ]
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        session = session_factory()
+        for store_id, name, zip_code, city, state in stores:
+            repo.upsert_store(
+                session,
+                store_id,
+                name,
+                zip_code,
+                city=city,
+                state=state,
+            )
+
+        for index in range(item_count):
+            store_id, store_name, zip_code, _, _ = random.choice(stores)
+            category = random.choice(categories)
+            sku = f"FAKE{index:05d}"
+            title = f"Test Item {index:03d}"
+            price = round(random.uniform(5.0, 500.0), 2)
+            previous_price = price + round(random.uniform(1.0, 50.0), 2)
+            pct_off = round((previous_price - price) / previous_price, 2)
+            product_url = f"https://example.com/product/{sku}"
+
+            repo.upsert_item(
+                session,
+                sku,
+                "lowes",
+                title,
+                category,
+                product_url,
+                image_url=f"https://example.com/images/{sku}.jpg",
+            )
+
+            observation = Observation(
+                ts_utc=now - timedelta(minutes=random.randint(0, 720)),
+                retailer="lowes",
+                store_id=store_id,
+                store_name=store_name,
+                zip=zip_code,
+                sku=sku,
+                title=title,
+                category=category,
+                price=price,
+                price_was=previous_price,
+                pct_off=pct_off,
+                availability="In Stock",
+                product_url=product_url,
+                image_url=f"https://example.com/images/{sku}.jpg",
+                clearance=True,
+            )
+            repo.insert_observation(session, observation)
+
+        session.commit()
+        LOGGER.info("Generated %d synthetic items for testing", item_count)
+    except Exception:
+        if session is not None:
+            session.rollback()
+        raise
+    finally:
+        if session is not None:
+            session.close()
 
 
 def _record_selector_quarantine(
@@ -279,6 +462,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--dashboard",
         action="store_true",
         help="Start the FastAPI dashboard on port 8000 while the scraper runs.",
+    )
+    parser.add_argument(
+        "--generate-test-data",
+        action="store_true",
+        help="Populate the database with synthetic data and exit.",
     )
     parser.add_argument(
         "--validate",
@@ -593,6 +781,8 @@ async def _run_cycle(
     session_factory,
     notifier: Notifier,
 ) -> tuple[int, int]:
+    preflight_check(config)
+
     start = time.monotonic()
     total_items = 0
     total_alerts = 0
@@ -1437,6 +1627,10 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         LOGGER.info("Database initialized (existing tables preserved)")
     session_factory = make_session(engine)
 
+    if getattr(args, "generate_test_data", False):
+        generate_test_data(session_factory)
+        return
+
     notifier = Notifier()
 
     try:
@@ -1491,6 +1685,9 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     async def scheduled_cycle() -> None:
         try:
             await _run_cycle(args, config, categories, session_factory, notifier)
+        except PreflightError as exc:
+            LOGGER.exception("Scheduled preflight check failed")
+            raise
         except Exception:
             LOGGER.exception("Scheduled run cycle failed")
 
@@ -1539,6 +1736,9 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 def main() -> None:
     try:
         asyncio.run(_async_main())
+    except PreflightError as exc:
+        LOGGER.error("Preflight check failed: %s", exc)
+        raise SystemExit(1) from exc
     except KeyboardInterrupt:  # pragma: no cover - interactive safety
         LOGGER.info("Interrupted by user")
 
