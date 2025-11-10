@@ -27,7 +27,6 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
-from playwright.sync_api import sync_playwright
 
 from app.catalog.discover_lowes import (
     discover_categories,
@@ -178,8 +177,10 @@ async def validate_selectors() -> dict[str, Any]:
     return {"counts": counts, "errors": errors}
 
 
-def preflight_check(config: dict[str, Any]) -> None:
-    """Validate environment prerequisites prior to running a scrape."""
+async def preflight_check(config: dict[str, Any]) -> None:
+    """Validate environment prerequisites prior to running a scrape (async-safe)."""
+
+    skip_browser = os.environ.get("CHEAPSKATER_SKIP_PREFLIGHT") == "1"
 
     errors: list[str] = []
 
@@ -197,33 +198,6 @@ def preflight_check(config: dict[str, Any]) -> None:
     for path in sorted(required_paths):
         if not path.exists():
             errors.append(f"Required file missing: {path}")
-
-    selector_errors: list[str] = []
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                page = browser.new_page()
-                html_content = "<html><body></body></html>"
-                page.set_content(html_content)
-                for name in dir(selectors):
-                    if not name.isupper():
-                        continue
-                    selector_value = getattr(selectors, name)
-                    if not isinstance(selector_value, str) or not selector_value.strip():
-                        continue
-                    try:
-                        page.query_selector_all(selector_value)
-                    except Exception as exc:  # pragma: no cover - defensive
-                        selector_errors.append(
-                            f"Selector '{name}' is not valid CSS: {exc}"
-                        )
-            finally:
-                browser.close()
-    except Exception as exc:  # pragma: no cover - defensive
-        selector_errors.append(f"Selector validation failed: {exc}")
-
-    errors.extend(selector_errors)
 
     sqlite_target = _resolve_config_path(
         config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite")
@@ -265,6 +239,31 @@ def preflight_check(config: dict[str, Any]) -> None:
             f"Detected {sys.version_info.major}.{sys.version_info.minor}"
         )
 
+    selector_errors: list[str] = []
+    if not skip_browser:
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    await page.set_content("<html><body></body></html>")
+                    # Syntactic sanity-check for selectors. Do NOT require matches.
+                    for name in dir(selectors):
+                        if not name.isupper():
+                            continue
+                        selector_value = getattr(selectors, name)
+                        if not isinstance(selector_value, str) or not selector_value.strip():
+                            continue
+                        try:
+                            _ = await page.query_selector_all(selector_value)
+                        except Exception as exc:
+                            selector_errors.append(f"Selector '{name}' invalid: {exc}")
+                finally:
+                    await browser.close()
+        except Exception as exc:
+            selector_errors.append(f"Selector validation failed: {exc}")
+
+    errors.extend(selector_errors)
     if errors:
         raise PreflightError("; ".join(errors))
 
@@ -781,7 +780,7 @@ async def _run_cycle(
     session_factory,
     notifier: Notifier,
 ) -> tuple[int, int]:
-    preflight_check(config)
+    await preflight_check(config)
 
     start = time.monotonic()
     total_items = 0
