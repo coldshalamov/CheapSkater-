@@ -19,6 +19,13 @@ python -m playwright install chromium
 
 ## Quick verify
 
+In sandboxes/CI without a full Chromium stack:
+
+```
+set CHEAPSKATER_SKIP_PREFLIGHT=1   # Windows (PowerShell: $env:CHEAPSKATER_SKIP_PREFLIGHT=1)
+export CHEAPSKATER_SKIP_PREFLIGHT=1  # macOS/Linux
+```
+
 ```bash
 python -m venv .venv
 . .venv/bin/activate  # or .venv\Scripts\activate on Windows
