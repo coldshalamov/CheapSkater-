@@ -1,5 +1,6 @@
 # After installing dependencies, run: python -m playwright install
 playwright>=1.45.0
+pytest>=8.3.4
 pydantic>=2.8.2
 pydantic-core>=2.20.1
 pyyaml>=6.0.1
