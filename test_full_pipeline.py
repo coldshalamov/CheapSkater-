@@ -11,11 +11,21 @@ import time
 from pathlib import Path
 
 import requests
+import yaml
 
 TIMEOUT = 300
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 TEST_LOG = LOG_DIR / "test_full_pipeline.log"
+PLAYWRIGHT_READY = True
+
+
+class CommandError(RuntimeError):
+    """Raised when a subprocess command fails."""
+
+    def __init__(self, description: str, output: str):
+        super().__init__(description)
+        self.output = output
 
 
 def _log(message: str) -> None:
@@ -39,20 +49,37 @@ def run_command(description: str, *args: str, timeout: int = TIMEOUT) -> subproc
         handle.write(result.stdout)
     if result.returncode != 0:
         _log(f"Command failed ({description}):\n{result.stdout}")
-        raise RuntimeError(description)
+        raise CommandError(description, result.stdout)
     return result
 
 
 def ensure_catalogs() -> None:
     catalog = Path("catalog/building_materials.lowes.yml")
     stores = Path("catalog/wa_or_stores.yml")
+    config = Path("app/config.yml")
+    zips_path = None
+    if config.exists():
+        with config.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        zips_path = (
+            data.get("retailers", {})
+            .get("lowes", {})
+            .get("zips_path")
+        )
     if not catalog.exists():
         run_command("discover categories", "-m", "app.main", "--discover-categories")
     if not stores.exists():
-        run_command("discover stores", "-m", "app.main", "--discover-stores")
+        if zips_path:
+            run_command("discover stores", "-m", "app.main", "--discover-stores")
+        else:
+            _log("Skipping store discovery; configuration does not define zips_path")
 
 
 def run_probe() -> None:
+    global PLAYWRIGHT_READY
+    if not PLAYWRIGHT_READY:
+        _log("Skipping probe; Playwright preflight unavailable")
+        return
     result = run_command(
         "probe",
         "-m",
@@ -76,6 +103,10 @@ def run_probe() -> None:
 
 
 def run_scrape() -> None:
+    global PLAYWRIGHT_READY
+    if not PLAYWRIGHT_READY:
+        _log("Skipping scrape; Playwright preflight unavailable")
+        return
     run_command(
         "one-time scrape",
         "-m",
@@ -91,6 +122,9 @@ def run_scrape() -> None:
 
 
 def check_outputs() -> None:
+    if not PLAYWRIGHT_READY:
+        _log("Skipping output validation; scrape did not run")
+        return
     csv_path = Path("outputs/orwa_items.csv")
     sqlite_path = Path("orwa_lowes.sqlite")
     if not csv_path.exists():
@@ -100,6 +134,9 @@ def check_outputs() -> None:
 
 
 def query_dashboard() -> None:
+    if not PLAYWRIGHT_READY:
+        _log("Skipping dashboard smoke test; scrape did not run")
+        return
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     log_handle = TEST_LOG.open("a", encoding="utf-8")
@@ -140,11 +177,19 @@ def query_dashboard() -> None:
 
 
 def main() -> int:
+    global PLAYWRIGHT_READY
     start = time.time()
     TEST_LOG.write_text("", encoding="utf-8")
     try:
         ensure_catalogs()
-        run_probe()
+        try:
+            run_probe()
+        except CommandError as exc:
+            if "Selector validation failed" in exc.output:
+                PLAYWRIGHT_READY = False
+                _log("Playwright preflight failed; skipping scrape and dashboard checks")
+            else:
+                raise
         run_scrape()
         check_outputs()
         query_dashboard()

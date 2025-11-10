@@ -17,6 +17,16 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
+## Quick verify
+
+```bash
+python -m venv .venv
+. .venv/bin/activate  # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+python -m playwright install chromium
+pytest -q
+```
+
 ## Configuration
 
 Key settings in `app/config.yml`:
