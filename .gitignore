@@ -1,5 +1,6 @@
 # Virtual environments
 /.venv/
+.playwright-profile/
 
 # Python cache directories
 __pycache__/

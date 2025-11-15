@@ -1,16 +1,3 @@
-categories:
-  - { name: "Drywall",                    url: "https://www.lowes.com/c/Drywall" }
-  - { name: "Insulation & Accessories",   url: "https://www.lowes.com/c/Insulation-accessories" }
-  - { name: "Roofing",                    url: "https://www.lowes.com/c/Roofing" }
-  - { name: "Siding & Stone Veneer",      url: "https://www.lowes.com/c/Siding-stone-veneer" }
-  - { name: "Concrete, Cement & Masonry", url: "https://www.lowes.com/c/Concrete-cement-masonry" }
-  - { name: "Decking",                    url: "https://www.lowes.com/c/Decking" }
-  - { name: "Lumber & Composites",        url: "https://www.lowes.com/c/Lumber-composites" }
-  - { name: "Gutters & Accessories",      url: "https://www.lowes.com/c/Gutters-accessories" }
-  - { name: "Ceilings",                   url: "https://www.lowes.com/c/Ceilings" }
-  - { name: "Columns & Accessories",      url: "https://www.lowes.com/c/Columns-accessories" }
-  - { name: "Stairs & Railings",          url: "https://www.lowes.com/c/Stairs-railings" }
-  - { name: "Glass & Acrylic",            url: "https://www.lowes.com/c/Glass-acrylic" }
-  - { name: "Electrical",                 url: "https://www.lowes.com/c/Electrical" }
-  - { name: "Flooring",                   url: "https://www.lowes.com/c/Flooring" }
-  - { name: "Last Chance Deals",          url: "https://www.lowes.com/pl/Last-chance-deals/2969724014" }
+﻿categories:
+  - name: The Back Aisle
+    url: https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&inStock=1&rollUpVariants=0

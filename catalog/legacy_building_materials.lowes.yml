@@ -1,0 +1,387 @@
+categories:
+  - name: Accessible Home
+    url: https://www.lowes.com/c/Accessible-home
+  - name: Accessible Bathroom
+    url: https://www.lowes.com/pl/Accessible-bathroom-Accessible-home/37721669146437
+  - name: Accessible Bedroom
+    url: https://www.lowes.com/pl/Accessible-bedroom-Accessible-home/4294644781
+  - name: Accessible Entry & Home
+    url: https://www.lowes.com/pl/Accessible-entry-home-Accessible-home/37721669146444
+  - name: Accessible Kitchen
+    url: https://www.lowes.com/pl/Accessible-kitchen-Accessible-home/1111913019980
+  - name: Daily Assistance
+    url: https://www.lowes.com/pl/Daily-assistance-Accessible-home/4294644797
+  - name: Injury Relief & Physical Therapy
+    url: https://www.lowes.com/pl/Injury-relief-physical-therapy-Accessible-home/4294644776
+  - name: Wheelchairs & Mobility Aids
+    url: https://www.lowes.com/pl/Wheelchairs-mobility-aids-Accessible-home/4294644793
+  - name: Animal & Pet Care
+    url: https://www.lowes.com/c/Animal-pet-care
+  - name: Livestock Supplies
+    url: https://www.lowes.com/pl/Livestock-supplies-Animal-pet-care/1697941494
+  - name: Pet Beds, Houses & Furniture
+    url: https://www.lowes.com/pl/Pet-beds-houses-furniture-Animal-pet-care/2544332199
+  - name: Pet Cleaning & Waste Supplies
+    url: https://www.lowes.com/pl/Pet-cleaning-waste-supplies-Animal-pet-care/2318112555
+  - name: Pet Clippers, Scissors & Brushes
+    url: https://www.lowes.com/pl/Pet-clippers-scissors-brushes-Animal-pet-care/3121493845732
+  - name: Pet Clothing & Accessories
+    url: https://www.lowes.com/pl/Pet-clothing-accessories-Animal-pet-care/2921724317701
+  - name: Pet Doors & Gates
+    url: https://www.lowes.com/pl/Pet-doors-gates-Animal-pet-care/4294610550
+  - name: Pet Feeding Supplies
+    url: https://www.lowes.com/pl/Pet-feeding-supplies-Animal-pet-care/2510803352
+  - name: Pet Fencing & Training
+    url: https://www.lowes.com/pl/Pet-fencing-training-Animal-pet-care/3583519698
+  - name: Pet Grooming & Health
+    url: https://www.lowes.com/pl/Pet-grooming-health-Animal-pet-care/4294610546
+  - name: Pet Kennels & Crates
+    url: https://www.lowes.com/pl/Pet-kennels-crates-Animal-pet-care/778128516
+  - name: Pet Leashes, Collars & Harnesses
+    url: https://www.lowes.com/pl/Pet-leashes-collars-harnesses-Animal-pet-care/4233103602
+  - name: Pet Toys & Treats
+    url: https://www.lowes.com/pl/Pet-toys-treats-Animal-pet-care/4294610530
+  - name: Pet Travel & Transportation
+    url: https://www.lowes.com/pl/Pet-travel-transportation-Animal-pet-care/2620088367057
+  - name: Pet Vitamins & Supplements
+    url: https://www.lowes.com/pl/Pet-vitamins-supplements-Animal-pet-care/2620555201638
+  - name: Terrariums & Habitats
+    url: https://www.lowes.com/pl/Terrariums-habitats-Animal-pet-care/2311219941942
+  - name: Appliances
+    url: https://www.lowes.com/c/Appliances
+  - name: Appliance Parts & Accessories
+    url: https://www.lowes.com/c/Appliance-parts-accessories-Appliances
+  - name: Beverage & Wine Chillers
+    url: https://www.lowes.com/pl/Beverage-wine-chillers-Appliances/2352008713
+  - name: Commercial Appliances
+    url: https://www.lowes.com/c/Commercial-appliances-Appliances
+  - name: Cooktops
+    url: https://www.lowes.com/c/Cooktops-Appliances
+  - name: Crafting Machines & Accessories
+    url: https://www.lowes.com/pl/Crafting-machines-accessories-Appliances/37721669146480
+  - name: Dishwashers
+    url: https://www.lowes.com/c/Dishwashers-Appliances
+  - name: Freezers
+    url: https://www.lowes.com/c/Freezers-Appliances
+  - name: Garbage Disposals
+    url: https://www.lowes.com/pl/Garbage-disposals-Appliances/4294639585
+  - name: Ice Makers
+    url: https://www.lowes.com/pl/Ice-makers-Appliances/4294796261
+  - name: Kitchen Appliance Packages
+    url: https://www.lowes.com/pl/Kitchen-appliance-packages-Appliances/2020942007672
+  - name: Kitchenettes
+    url: https://www.lowes.com/pl/Kitchenettes-Appliances/1511792640827
+  - name: Microwaves
+    url: https://www.lowes.com/c/Microwaves-Appliances
+  - name: Range Hoods
+    url: https://www.lowes.com/c/Range-hoods-Appliances
+  - name: Ranges
+    url: https://www.lowes.com/c/Ranges-Appliances
+  - name: Refrigerators
+    url: https://www.lowes.com/c/Refrigerators-Appliances
+  - name: Sewing Machines & Accessories
+    url: https://www.lowes.com/pl/Sewing-machines-accessories-Appliances/37721669146479
+  - name: Small Appliances
+    url: https://www.lowes.com/c/Small-appliances-Appliances
+  - name: Trash Compactors
+    url: https://www.lowes.com/pl/Trash-compactors-Appliances/4294639583
+  - name: Vacuum Cleaners & Floor Care
+    url: https://www.lowes.com/c/Vacuum-cleaners-floor-care-Appliances
+  - name: Wall Ovens
+    url: https://www.lowes.com/c/Wall-ovens-Appliances
+  - name: Washers & Dryers
+    url: https://www.lowes.com/c/Washers-dryers-Appliances
+  - name: Water Coolers & Pitchers
+    url: https://www.lowes.com/pl/Water-coolers-pitchers-Appliances/479649473
+  - name: Glues & Tapes
+    url: https://www.lowes.com/c/Glues-tapes
+  - name: Glues
+    url: https://www.lowes.com/c/Glues-Glues-tapes
+  - name: Tapes
+    url: https://www.lowes.com/c/Tapes-Glues-tapes
+  - name: Hardware
+    url: https://www.lowes.com/c/Hardware
+  - name: Cabinet Hardware
+    url: https://www.lowes.com/c/Cabinet-hardware-Hardware
+  - name: Chains, Ropes & Tie-Downs
+    url: https://www.lowes.com/pl/Chains-ropes-tie-downs-Hardware/4294934403
+  - name: Door Hardware
+    url: https://www.lowes.com/c/Door-hardware-Hardware
+  - name: Fasteners
+    url: https://www.lowes.com/c/Fasteners-Hardware
+  - name: Furniture Hardware
+    url: https://www.lowes.com/pl/Furniture-hardware-Hardware/4294711128
+  - name: Gate Hardware
+    url: https://www.lowes.com/pl/Gate-hardware-Hardware/4294856551
+  - name: Hardware Lubricants
+    url: https://www.lowes.com/pl/Hardware-lubricants-Hardware/4294607587
+  - name: Hooks
+    url: https://www.lowes.com/pl/Hooks-Hardware/4294710936
+  - name: Keys & Key Safes
+    url: https://www.lowes.com/pl/Keys-key-safes-Hardware/4294711033
+  - name: Locks
+    url: https://www.lowes.com/pl/Locks-Hardware/4294400565
+  - name: Mailboxes & Mailbox Posts
+    url: https://www.lowes.com/c/Mailboxes-mailbox-posts-Hardware
+  - name: Marine Hardware
+    url: https://www.lowes.com/pl/Marine-hardware-Hardware/4294710793
+  - name: Metal Rods, Shapes & Sheets
+    url: https://www.lowes.com/pl/Metal-rods-shapes-sheets-Hardware/2922688282
+  - name: Picture Hangers
+    url: https://www.lowes.com/pl/Picture-hangers-Hardware/4294710790
+  - name: Safes
+    url: https://www.lowes.com/c/Safes-Hardware
+  - name: Signs, Letters & Numbers
+    url: https://www.lowes.com/pl/Signs-letters-numbers-Hardware/4294711114
+  - name: Specialty Hardware
+    url: https://www.lowes.com/pl/Specialty-hardware-Hardware/4294711047
+  - name: Structural Hardware
+    url: https://www.lowes.com/c/Structural-hardware-Hardware
+  - name: Window Hardware
+    url: https://www.lowes.com/pl/Window-hardware-Hardware/4294711110
+  - name: Heating & Cooling
+    url: https://www.lowes.com/c/Heating-cooling
+  - name: Air Conditioners & Fans
+    url: https://www.lowes.com/c/Air-conditioners-fans-Heating-cooling
+  - name: Air Filters & Accessories
+    url: https://www.lowes.com/c/Air-filters-accessories-Heating-cooling
+  - name: Air Purifiers & Accessories
+    url: https://www.lowes.com/c/Air-purifiers-accessories-Heating-cooling
+  - name: Boilers
+    url: https://www.lowes.com/pl/Boilers-Heating-cooling/1794897186
+  - name: Ductless Mini Splits
+    url: https://www.lowes.com/c/Ductless-mini-splits-Heating-cooling
+  - name: Fireplaces & Stoves
+    url: https://www.lowes.com/c/Fireplaces-stoves-Heating-cooling
+  - name: Furnaces & Accessories
+    url: https://www.lowes.com/pl/Furnaces-furnace-accessories-Heating-cooling/4294618086
+  - name: HVAC Components
+    url: https://www.lowes.com/pl/HVAC-components-Heating-cooling/542366694
+  - name: HVAC Duct & Fittings
+    url: https://www.lowes.com/pl/HVAC-duct-fittings-Heating-cooling/4294512241
+  - name: Heat Pumps
+    url: https://www.lowes.com/pl/Heat-pumps-Heating-cooling/4294618089
+  - name: Humidifiers & Dehumidifiers
+    url: https://www.lowes.com/c/Humidifiers-dehumidifiers-Heating-cooling
+  - name: Portable & Space Heaters
+    url: https://www.lowes.com/c/Portable-space-heaters-Heating-cooling
+  - name: Radiator Covers
+    url: https://www.lowes.com/pl/Radiator-covers-Heating-cooling/4294395587
+  - name: Registers & Grilles
+    url: https://www.lowes.com/c/Registers-grilles-Heating-cooling
+  - name: Thermostats
+    url: https://www.lowes.com/c/Thermostats-Heating-cooling
+  - name: Holiday Decorations
+    url: https://www.lowes.com/c/Holiday-decorations
+  - name: Christmas Decorations
+    url: https://www.lowes.com/c/Christmas-decorations-Holiday-decorations
+  - name: Fall Decorations
+    url: https://www.lowes.com/pl/Fall-decorations-Holiday-decorations/914756848
+  - name: Fourth of July Decorations
+    url: https://www.lowes.com/pl/Fourth-of-july-decorations-Holiday-decorations/3007020135
+  - name: Halloween Decorations
+    url: https://www.lowes.com/pl/Halloween-decorations-Holiday-decorations/4294586669
+  - name: Hanukkah Decorations
+    url: https://www.lowes.com/pl/Hanukkah-decorations-Holiday-decorations/4294586675
+  - name: Seasonal Decorations
+    url: https://www.lowes.com/pl/Seasonal-decorations-Holiday-decorations/2850470667
+  - name: Home Decor
+    url: https://www.lowes.com/c/Home-decor
+  - name: Area Rugs & Mats
+    url: https://www.lowes.com/c/Area-rugs-mats-Home-decor
+  - name: Bed & Bath
+    url: https://www.lowes.com/pl/Bed-bath-Home-decor/3596460801
+  - name: Furniture
+    url: https://www.lowes.com/c/Furniture-Home-decor
+  - name: Home Accents
+    url: https://www.lowes.com/c/Home-accents-Home-decor
+  - name: Home Decor Collections
+    url: https://www.lowes.com/pl/Home-decor-collections-Home-decor/2111568621127
+  - name: Luggage & Travel
+    url: https://www.lowes.com/pl/Luggage-travel-Home-decor/255140825
+  - name: Mirrors & Accessories
+    url: https://www.lowes.com/c/Mirrors-mirror-accessories-Home-decor
+  - name: Pillows & Throws
+    url: https://www.lowes.com/pl/Pillows-throws-Home-decor/902277247
+  - name: Wall Art & Decor
+    url: https://www.lowes.com/c/Wall-art-decor-Home-decor
+  - name: Wallpaper & Accessories
+    url: https://www.lowes.com/c/Wallpaper-accessories-Home-decor
+  - name: Window Treatments
+    url: https://www.lowes.com/c/Window-treatments-Home-decor
+  - name: Kitchen
+    url: https://www.lowes.com/c/Kitchen
+  - name: Backsplash Panels
+    url: https://www.lowes.com/pl/Backsplash-panels-Kitchen/4294395588
+  - name: Kitchen & Bar Sinks
+    url: https://www.lowes.com/c/Kitchen-bar-sinks-Kitchen
+  - name: Kitchen Cabinetry
+    url: https://www.lowes.com/c/Kitchen-cabinetry-Kitchen
+  - name: Kitchen Countertops & Accessories
+    url: https://www.lowes.com/c/Kitchen-countertops-accessories-Kitchen
+  - name: Kitchen Faucets & Water Dispensers
+    url: https://www.lowes.com/c/Kitchen-faucets-water-dispensers-Kitchen
+  - name: Kitchenware
+    url: https://www.lowes.com/c/Kitchenware-Kitchen
+  - name: Lawn & Garden
+    url: https://www.lowes.com/c/Lawn-garden
+  - name: Garden Decor
+    url: https://www.lowes.com/c/Garden-decor-Lawn-garden
+  - name: Garden Hoses & Accessories
+    url: https://www.lowes.com/c/Garden-hoses-accessories-Lawn-garden
+  - name: Greenhouses & Accessories
+    url: https://www.lowes.com/pl/Greenhouses-accessories-Lawn-garden/4294512248
+  - name: Insect & Pest Control
+    url: https://www.lowes.com/c/Insect-pest-control-Lawn-garden
+  - name: Irrigation
+    url: https://www.lowes.com/c/Irrigation-Lawn-garden
+  - name: Landscaping
+    url: https://www.lowes.com/c/Landscaping-Lawn-garden
+  - name: Lawn Care
+    url: https://www.lowes.com/c/Lawn-care-Lawn-garden
+  - name: Outdoor Drainage
+    url: https://www.lowes.com/c/Outdoor-drainage-Lawn-garden
+  - name: Pavers & Retaining Walls
+    url: https://www.lowes.com/c/Pavers-retaining-walls-Lawn-garden
+  - name: Plant Care & Supplies
+    url: https://www.lowes.com/pl/Plant-care-supplies-Lawn-garden/4294612534
+  - name: Planters, Stands & Garden Beds
+    url: https://www.lowes.com/c/Planters-stands-garden-beds-Lawn-garden
+  - name: Plants, Bulbs & Seeds
+    url: https://www.lowes.com/c/Plants-bulbs-seeds-Lawn-garden
+  - name: Lighting & Ceiling Fans
+    url: https://www.lowes.com/c/Lighting-ceiling-fans
+  - name: Bathroom & Wall Lighting
+    url: https://www.lowes.com/c/Bathroom-wall-lighting-Lighting-ceiling-fans
+  - name: Ceiling Fan Parts & Accessories
+    url: https://www.lowes.com/pl/Ceiling-fan-parts-accessories-Lighting-ceiling-fans/4294395603
+  - name: Ceiling Fans
+    url: https://www.lowes.com/c/Ceiling-fans-Lighting-ceiling-fans
+  - name: Ceiling Lights
+    url: https://www.lowes.com/pl/Ceiling-lights-Lighting-ceiling-fans/1514558678
+  - name: Commercial Lighting
+    url: https://www.lowes.com/c/Commercial-lighting-Lighting-ceiling-fans
+  - name: Lamps & Lamp Shades
+    url: https://www.lowes.com/pl/Lamps-lamp-shades-Lighting-ceiling-fans/4294925668
+  - name: Light Bulbs
+    url: https://www.lowes.com/c/Light-bulbs-Lighting-ceiling-fans
+  - name: Lighting Parts & Accessories
+    url: https://www.lowes.com/pl/Lighting-parts-accessories-Lighting-ceiling-fans/4294925669
+  - name: Night Lights
+    url: https://www.lowes.com/pl/Night-lights-Lighting-ceiling-fans/4294857028
+  - name: Novelty Lighting
+    url: https://www.lowes.com/pl/Novelty-lighting-Lighting-ceiling-fans/4294566036
+  - name: Outdoor Lighting
+    url: https://www.lowes.com/c/Outdoor-lighting-Lighting-ceiling-fans
+  - name: Under Cabinet Lighting
+    url: https://www.lowes.com/c/Under-cabinet-lighting-Lighting-ceiling-fans
+  - name: Moulding & Millwork
+    url: https://www.lowes.com/c/Moulding-millwork
+  - name: Brackets & Braces
+    url: https://www.lowes.com/pl/Brackets-braces-Moulding-millwork/2410111951795
+  - name: Dowels & Dowel Pins
+    url: https://www.lowes.com/pl/Dowels-dowel-pins-Moulding-millwork/4294402555
+  - name: Moulding
+    url: https://www.lowes.com/c/Moulding-Moulding-millwork
+  - name: Wall Panels & Planks
+    url: https://www.lowes.com/c/Wall-panels-planks-Moulding-millwork
+  - name: Outdoor Recreation
+    url: https://www.lowes.com/c/Outdoor-recreation
+  - name: Bike Accessories
+    url: https://www.lowes.com/pl/Bike-accessories-Outdoor-recreation/2321646038739
+  - name: Bikes
+    url: https://www.lowes.com/pl/Bikes-Outdoor-recreation/2426769188
+  - name: Boating
+    url: https://www.lowes.com/pl/Boating-Outdoor-recreation/2764575254
+  - name: Camping, Hunting & Fishing
+    url: https://www.lowes.com/pl/Camping-hunting-fishing-Outdoor-recreation/3172089732
+  - name: Fireworks
+    url: https://www.lowes.com/pl/Fireworks-Outdoor-recreation/1820112634192
+  - name: Game Room
+    url: https://www.lowes.com/pl/Game-room-Outdoor-recreation/4294610499
+  - name: Golf
+    url: https://www.lowes.com/pl/Golf-Outdoor-recreation/3515281005
+  - name: Metal Detectors
+    url: https://www.lowes.com/pl/Metal-detectors-Outdoor-recreation/2321957009384
+  - name: RV Accessories
+    url: https://www.lowes.com/pl/RV-accessories-Outdoor-recreation/1403527902
+  - name: Recreational Vehicles
+    url: https://www.lowes.com/pl/Recreational-vehicles-Outdoor-recreation/2510965754766
+  - name: Scooters
+    url: https://www.lowes.com/pl/Scooters-Outdoor-recreation/537872457
+  - name: Water Sports
+    url: https://www.lowes.com/pl/Water-sports-Outdoor-recreation/4294599090
+  - name: Winter Sports
+    url: https://www.lowes.com/pl/Winter-sports-Outdoor-recreation/4294610308
+  - name: Outdoors
+    url: https://www.lowes.com/c/Outdoors
+  - name: Commercial Park Equipment
+    url: https://www.lowes.com/pl/Commercial-park-equipment-Outdoors/4294610286
+  - name: Fire Pits & Patio Heaters
+    url: https://www.lowes.com/c/Fire-pits-patio-heaters-Outdoors
+  - name: Grills & Outdoor Cooking
+    url: https://www.lowes.com/c/Grills-outdoor-cooking-Outdoors
+  - name: Hot Tubs, Spas & Components
+    url: https://www.lowes.com/pl/Hot-tubs-spas-components-Outdoors/4294610266
+  - name: Outdoor Games & Toys
+    url: https://www.lowes.com/c/Outdoor-games-toys-Outdoors
+  - name: Outdoor Tools & Equipment
+    url: https://www.lowes.com/c/Outdoor-tools-equipment-Outdoors
+  - name: Patio Furniture
+    url: https://www.lowes.com/c/Patio-furniture-Outdoors
+  - name: Playsets
+    url: https://www.lowes.com/c/Playsets-Outdoors
+  - name: Pools
+    url: https://www.lowes.com/c/Pools-Outdoors
+  - name: Sheds & Outdoor Storage
+    url: https://www.lowes.com/c/Sheds-outdoor-storage-Outdoors
+  - name: Paint
+    url: https://www.lowes.com/c/Paint
+  - name: Caulking
+    url: https://www.lowes.com/c/Caulking-Paint
+  - name: Ceiling Paint
+    url: https://www.lowes.com/pl/Ceiling-paint-Paint/611625339713
+  - name: Craft Paint & Supplies
+    url: https://www.lowes.com/c/Craft-paint-supplies-Paint
+  - name: Door & Trim Paint
+    url: https://www.lowes.com/pl/Door-trim-paint-Paint/861738257
+  - name: Exterior Paint
+    url: https://www.lowes.com/c/Exterior-paint-Paint
+  - name: Exterior Wood Coatings
+    url: https://www.lowes.com/c/Exterior-wood-coatings-Paint
+  - name: Floor Coatings
+    url: https://www.lowes.com/pl/Floor-coatings-Paint/1510843523410
+  - name: Interior Paint
+    url: https://www.lowes.com/c/Interior-paint-Paint
+  - name: Interior Stains & Finishes
+    url: https://www.lowes.com/c/Interior-stains-finishes-Paint
+  - name: Paint Cleaners, Chemicals & Additives
+    url: https://www.lowes.com/pl/Paint-cleaners-chemicals-additives-Paint/2521972965619
+  - name: Paint Samples
+    url: https://www.lowes.com/c/Paint-samples-Paint
+  - name: Paint Supplies
+    url: https://www.lowes.com/c/Paint-supplies-Paint
+  - name: Patching & Repair
+    url: https://www.lowes.com/c/Patching-repair-Paint
+  - name: Primer
+    url: https://www.lowes.com/c/Primer-Paint
+  - name: Specialty & Commercial Paint
+    url: https://www.lowes.com/c/Specialty-commercial-paint-Paint
+  - name: Spray Paint & Accessories
+    url: https://www.lowes.com/c/Spray-paint-accessories-Paint
+  - name: Personal Care & Grooming
+    url: https://www.lowes.com/pl/Personal-care-grooming/4294639595
+  - name: Plumbing
+    url: https://www.lowes.com/c/Plumbing
+  - name: Safety
+    url: https://www.lowes.com/c/Safety
+  - name: Smart Home, Security & Wi-Fi
+    url: https://www.lowes.com/c/Smart-home-security-wi-fi
+  - name: Sports & Fitness
+    url: https://www.lowes.com/c/Sports-fitness
+  - name: Storage & Organization
+    url: https://www.lowes.com/c/Storage-organization
+  - name: Tools
+    url: https://www.lowes.com/c/Tools
+  - name: Windows & Doors
+    url: https://www.lowes.com/c/Windows-doors

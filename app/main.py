@@ -44,6 +44,13 @@ from app.storage import repo
 from app.storage.db import check_quarantine_table, get_engine, init_db_safe, make_session
 from app.storage.models_sql import Alert, Observation
 import app.selectors as selectors
+from app.playwright_env import (
+    apply_stealth,
+    close_browser,
+    launch_browser,
+    selector_validation_skipped,
+    zip_delay_bounds,
+)
 
 
 LOGGER = get_logger(__name__)
@@ -101,6 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "electrical",
         "hardware",
         "tool",
+        "back aisle",
     ],
     "quarantine_retention_days": 7,
     "healthcheck_url": "",
@@ -120,15 +128,34 @@ class ProcessingStats:
     reasons: Counter[str] = field(default_factory=Counter)
 
 
+async def _zip_pause() -> None:
+    """Global pacing hook between ZIPs to avoid bursty traffic."""
+
+    min_ms, max_ms = zip_delay_bounds()
+    if max_ms <= 0:
+        return
+    await human_wait(min_ms, max_ms, obey_policy=False)
+
+
 async def validate_selectors() -> dict[str, Any]:
     """Validate known selectors against the Lowe's homepage."""
 
     counts: dict[str, int] = {}
     errors: list[str] = []
+    selector_skip = getattr(selectors, "NON_SELECTOR_CONSTANTS", set())
+
+    if selector_validation_skipped():
+        LOGGER.info("Selector validation skipped via CHEAPSKATER_SKIP_PREFLIGHT")
+        return {"counts": counts, "errors": errors}
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
-        page = await browser.new_page()
+        apply_stealth(playwright)
+        browser, persistent_context = await launch_browser(playwright)
+        page = (
+            await persistent_context.new_page()
+            if persistent_context is not None
+            else await browser.new_page()
+        )
         try:
             await page.goto(SELECTOR_VALIDATION_URL, wait_until="networkidle")
             await human_wait(0.5, 1.5)
@@ -146,6 +173,8 @@ async def validate_selectors() -> dict[str, Any]:
         try:
             for name in dir(selectors):
                 if not name.isupper():
+                    continue
+                if name in selector_skip:
                     continue
                 selector_value = getattr(selectors, name)
                 if not isinstance(selector_value, str):
@@ -169,10 +198,7 @@ async def validate_selectors() -> dict[str, Any]:
                     )
                     errors.append(error_message)
         finally:
-            try:
-                await browser.close()
-            except Exception:  # pragma: no cover - defensive
-                pass
+            await close_browser(browser, persistent_context)
 
     return {"counts": counts, "errors": errors}
 
@@ -243,13 +269,24 @@ async def preflight_check(config: dict[str, Any]) -> None:
     if not skip_browser:
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                apply_stealth(p)
+                browser, persistent_context = await launch_browser(p)
                 try:
-                    page = await browser.new_page()
+                    context = (
+                        persistent_context
+                        if persistent_context is not None
+                        else await browser.new_context()
+                    )
+                    page = await context.new_page()
                     await page.set_content("<html><body></body></html>")
                     # Syntactic sanity-check for selectors. Do NOT require matches.
+                    selector_skip = getattr(
+                        selectors, "NON_SELECTOR_CONSTANTS", set()
+                    )
                     for name in dir(selectors):
                         if not name.isupper():
+                            continue
+                        if name in selector_skip:
                             continue
                         selector_value = getattr(selectors, name)
                         if not isinstance(selector_value, str) or not selector_value.strip():
@@ -259,7 +296,7 @@ async def preflight_check(config: dict[str, Any]) -> None:
                         except Exception as exc:
                             selector_errors.append(f"Selector '{name}' invalid: {exc}")
                 finally:
-                    await browser.close()
+                    await close_browser(browser, persistent_context)
         except Exception as exc:
             selector_errors.append(f"Selector validation failed: {exc}")
 
@@ -703,6 +740,7 @@ _BUILDING_MATERIAL_KEYWORDS = {
     "beam",
     "stud",
     "sheathing",
+    "back aisle",
 }
 
 
@@ -879,7 +917,8 @@ async def _run_cycle(
             )
 
             async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(headless=True)
+                apply_stealth(playwright)
+                browser, persistent_context = await launch_browser(playwright)
                 try:
                     try:
                         rows = await run_for_zip(
@@ -888,6 +927,7 @@ async def _run_cycle(
                             [target_category],
                             clearance_threshold=pct_threshold,
                             browser=browser,
+                            shared_context=persistent_context,
                         )
                     except StoreContextError as exc:
                         LOGGER.error(
@@ -1001,13 +1041,11 @@ async def _run_cycle(
                     )
                     return processed_items, processed_alerts
                 finally:
-                    try:
-                        await browser.close()
-                    except Exception as exc:  # pragma: no cover - defensive
-                        LOGGER.warning("Failed to close probe browser: %s", exc)
+                    await close_browser(browser, persistent_context)
 
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
+            apply_stealth(playwright)
+            browser, persistent_context = await launch_browser(playwright)
 
             raw_max = config.get("max_concurrency", 3)
             try:
@@ -1019,19 +1057,25 @@ async def _run_cycle(
 
             desired = args.concurrency or configured_max
             effective_concurrency = max(1, min(desired, configured_max))
+            if persistent_context is not None and effective_concurrency > 1:
+                LOGGER.warning(
+                    "Persistent Chromium profile detected; forcing concurrency=1 to avoid session conflicts"
+                )
+                effective_concurrency = 1
             LOGGER.debug("Using concurrency=%s (max=%s)", effective_concurrency, configured_max)
             semaphore = asyncio.Semaphore(effective_concurrency)
 
             async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
                 async with semaphore:
-                    zip_extra = {"zip": zip_code}
                     try:
+                        zip_extra = {"zip": zip_code}
                         rows = await run_for_zip(
                             playwright,
                             zip_code,
                             categories_to_use,
                             clearance_threshold=pct_threshold,
                             browser=browser,
+                            shared_context=persistent_context,
                         )
                     except StoreContextError as exc:
                         LOGGER.error(
@@ -1089,39 +1133,42 @@ async def _run_cycle(
                         )
                         return 0, 0, False
 
-                    if not rows:
-                        LOGGER.info(
-                            "Scrape returned no rows for ZIP %s; continuing",
-                            zip_code,
-                            extra=zip_extra,
-                        )
-                        return 0, 0, True
+                    else:
+                        if not rows:
+                            LOGGER.info(
+                                "Scrape returned no rows for ZIP %s; continuing",
+                                zip_code,
+                                extra=zip_extra,
+                            )
+                            return 0, 0, True
 
-                    items = 0
-                    alerts = 0
-                    seen_keys: set[tuple[str, str | None]] = set()
-                    for row in rows:
-                        stats.processed += 1
-                        canonical, _ = _extract_identifiers(row)
-                        key = (zip_code, canonical)
-                        if canonical and key in seen_keys:
-                            stats.duplicates += 1
-                            continue
-                        if canonical:
-                            seen_keys.add(key)
-                        processed = await _process_row(
-                            row,
-                            zip_code,
-                            session_factory,
-                            notifier,
-                            pct_threshold,
-                            abs_map,
-                            stats=stats,
-                            dry_run=dry_run,
-                        )
-                        items += processed[0]
-                        alerts += processed[1]
-                    return items, alerts, True
+                        items = 0
+                        alerts = 0
+                        seen_keys: set[tuple[str, str | None]] = set()
+                        for row in rows:
+                            stats.processed += 1
+                            canonical, _ = _extract_identifiers(row)
+                            key = (zip_code, canonical)
+                            if canonical and key in seen_keys:
+                                stats.duplicates += 1
+                                continue
+                            if canonical:
+                                seen_keys.add(key)
+                            processed = await _process_row(
+                                row,
+                                zip_code,
+                                session_factory,
+                                notifier,
+                                pct_threshold,
+                                abs_map,
+                                stats=stats,
+                                dry_run=dry_run,
+                            )
+                            items += processed[0]
+                            alerts += processed[1]
+                        return items, alerts, True
+                    finally:
+                        await _zip_pause()
 
             try:
                 results = await asyncio.gather(
@@ -1132,10 +1179,7 @@ async def _run_cycle(
                     total_alerts += alerts
                     any_zip_success = any_zip_success or success
             finally:
-                try:
-                    await browser.close()
-                except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.warning("Failed to close shared browser: %s", exc)
+                await close_browser(browser, persistent_context)
     finally:
         duration = time.monotonic() - start
 
@@ -1578,6 +1622,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 
     if args.discover_categories or args.discover_stores:
         async with async_playwright() as playwright:
+            apply_stealth(playwright)
             if args.discover_categories:
                 categories = await discover_categories(playwright)
                 if not categories:

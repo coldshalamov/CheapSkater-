@@ -13,6 +13,7 @@ import yaml
 
 import app.selectors as selectors
 from app.extractors.dom_utils import human_wait, inner_text_safe, paginate_or_scroll
+from app.playwright_env import launch_browser
 
 BASE_URL = "https://www.lowes.com/"
 _CATEGORY_RE = re.compile(r"^/(?:c|pl)/", re.I)
@@ -31,8 +32,12 @@ class _CategoryCandidate:
 async def discover_categories(playwright: Any, max_depth: int = 3) -> list[dict[str, str]]:
     """Return a list of category dictionaries discovered from Lowe's public DOM."""
 
-    browser = await playwright.chromium.launch(headless=True)
-    context = await browser.new_context(viewport={"width": 1440, "height": 900})
+    browser, persistent_context = await launch_browser(playwright)
+    context = (
+        persistent_context
+        if persistent_context is not None
+        else await browser.new_context(viewport={"width": 1440, "height": 900})
+    )
     page = await context.new_page()
 
     try:
@@ -146,8 +151,12 @@ async def discover_categories(playwright: Any, max_depth: int = 3) -> list[dict[
 async def discover_stores_WA_OR(playwright: Any) -> list[dict[str, str]]:
     """Discover all Washington and Oregon stores from the public store locator."""
 
-    browser = await playwright.chromium.launch(headless=True)
-    context = await browser.new_context(viewport={"width": 1440, "height": 900})
+    browser, persistent_context = await launch_browser(playwright)
+    context = (
+        persistent_context
+        if persistent_context is not None
+        else await browser.new_context(viewport={"width": 1440, "height": 900})
+    )
     page = await context.new_page()
 
     try:

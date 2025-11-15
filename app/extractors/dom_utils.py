@@ -7,6 +7,8 @@ import random
 import re
 from typing import Any
 
+from app.playwright_env import apply_wait_policy
+
 try:  # Prefer Playwright's TimeoutError when available.
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 except Exception:  # pragma: no cover - fallback for environments without Playwright.
@@ -18,13 +20,21 @@ else:  # pragma: no cover - executed only when Playwright is absent.
     _HANDLEABLE_ERRORS = (Exception,)
 
 
-async def human_wait(min_ms: int = 600, max_ms: int = 1600) -> None:
+async def human_wait(
+    min_ms: int = 350,
+    max_ms: int = 900,
+    *,
+    obey_policy: bool = True,
+) -> None:
     """Sleep for a random, human-like interval between the provided bounds."""
 
     if min_ms < 0:
         min_ms = 0
     if max_ms < min_ms:
         max_ms = min_ms
+
+    if obey_policy:
+        min_ms, max_ms = apply_wait_policy(min_ms, max_ms)
 
     delay = random.uniform(min_ms / 1000, max_ms / 1000)
     await asyncio.sleep(delay)

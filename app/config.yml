@@ -37,6 +37,7 @@ material_keywords:
   - electrical
   - hardware
   - tool
+  - back aisle
 
 # Quarantine cleanup
 quarantine_retention_days: 7  # Remove quarantined rows after this many days

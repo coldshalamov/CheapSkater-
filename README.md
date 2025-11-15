@@ -101,6 +101,32 @@ The FastAPI dashboard lives at `http://localhost:8000` and provides:
 
 Static assets are served from `app/static` and the templates live under `app/templates`.
 
+### Windows launcher
+
+`launch.bat` automates the common Windows workflow:
+
+1. Ensures the virtual environment + dependencies exist.
+2. Runs a one-zip probe (defaults to the configured ZIP list unless you pass a ZIP override as the first argument).
+3. Starts the long-running scheduler with the dashboard enabled and opens your browser to `http://localhost:8000`.
+
+Press `Ctrl+C` in the launcher window to stop the scheduler/dashboard. Logs are written to `logs\launcher.log`, and the scraper output is persisted to `orwa_lowes.sqlite` plus `outputs\orwa_items.csv`.
+
+### Headless vs headed browser runs
+
+Some Lowe's endpoints block Playwright’s default headless fingerprint. Set `CHEAPSKATER_HEADLESS=0` (the launcher already does this) to force a headed Chromium session, which keeps scraping stable on Windows desktops. Leave the variable unset if you need true headless automation in CI.
+
+### Anti-bot tactics
+
+The repo now ships with the same tricks seasoned scrapers use to resemble organic traffic:
+
+- **Persistent Chromium profile**: `CHEAPSKATER_USER_DATA_DIR=.playwright-profile` reuses your real cookies, localStorage, and Lowe's consent banner state so each run looks like your regular browsing session. Delete the directory if you ever want a fresh profile.
+- **Stealth patches + slow-mo**: `playwright-stealth` spoofs navigator properties, sec-ch-ua headers, and WebGL fingerprints automatically. `CHEAPSKATER_SLOW_MO_MS` plus the configurable wait multipliers turn every click into a human-speed gesture.
+- **Random pacing**: `CHEAPSKATER_CATEGORY_DELAY_*` and `CHEAPSKATER_ZIP_DELAY_*` inject multi-second breathing room between categories and ZIP batches. Pair this with `--concurrency 1` for the most organic schedule.
+- **Mouse jitter + scrolling**: `CHEAPSKATER_MOUSE_JITTER=1` lets Playwright move the cursor and scroll idly before form submissions so Lowe's scripts observe genuine activity.
+- **Optional proxy / custom UA**: set `CHEAPSKATER_PROXY=http://user:pass@resip:port` or drop a realistic `USER_AGENT` in `.env` if you need to route traffic through residential egress.
+
+All of these knobs are exposed as environment variables (see `launch.bat` for concrete values). On Linux/macOS export them before running `python -m app.main --dashboard ...`.
+
 ## Data pipeline
 
 1. Playwright sets store context for each ZIP code while reusing a single browser instance per run.
