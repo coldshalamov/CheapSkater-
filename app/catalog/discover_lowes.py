@@ -18,6 +18,7 @@ from app.playwright_env import launch_browser
 BASE_URL = "https://www.lowes.com/"
 _CATEGORY_RE = re.compile(r"^/(?:c|pl)/", re.I)
 _ZIP_RE = re.compile(r"\b(\d{5})\b")
+_STORE_ID_RE = re.compile(r"Store\s*#\s*(\d+)", re.I)
 
 
 @dataclass(slots=True)
@@ -27,6 +28,25 @@ class _CategoryCandidate:
     path: str
     url: str
     names: set[str]
+
+
+async def _wait_for_idle(page: Any, timeout: int = 20000) -> None:
+    try:
+        await page.wait_for_load_state("networkidle", timeout=timeout)
+    except Exception:
+        return
+
+
+async def _first_visible(locators: list[Any]) -> Any | None:
+    for locator in locators:
+        if locator is None:
+            continue
+        try:
+            await locator.wait_for(state="visible", timeout=12000)
+            return locator
+        except Exception:
+            continue
+    return None
 
 
 async def discover_categories(playwright: Any, max_depth: int = 3) -> list[dict[str, str]]:
@@ -42,7 +62,7 @@ async def discover_categories(playwright: Any, max_depth: int = 3) -> list[dict[
 
     try:
         await page.goto(BASE_URL, wait_until="domcontentloaded")
-        await page.wait_for_load_state("networkidle")
+        await _wait_for_idle(page)
         await human_wait()
 
         candidates: dict[str, _CategoryCandidate] = {}
@@ -118,7 +138,7 @@ async def discover_categories(playwright: Any, max_depth: int = 3) -> list[dict[
                 await page.goto(url, wait_until="domcontentloaded")
             except Exception:
                 continue
-            await page.wait_for_load_state("networkidle")
+            await _wait_for_idle(page)
             await human_wait()
 
             entry = candidates.get(path)
@@ -160,26 +180,9 @@ async def discover_stores_WA_OR(playwright: Any) -> list[dict[str, str]]:
     page = await context.new_page()
 
     try:
-        await page.goto(BASE_URL, wait_until="domcontentloaded")
-        await page.wait_for_load_state("networkidle")
-        await human_wait()
-
-        locator = page.locator(selectors.STORE_LOCATOR_LINK).first
-        target_url = None
-        try:
-            if await locator.count() > 0:
-                target_url = await locator.get_attribute("href")
-        except Exception:
-            target_url = None
-
-        if target_url:
-            await page.goto(urljoin(BASE_URL, target_url), wait_until="domcontentloaded")
-        else:
-            try:
-                await locator.click()
-            except Exception:
-                pass
-        await page.wait_for_load_state("networkidle")
+        store_locator_url = urljoin(BASE_URL, "store/")
+        await page.goto(store_locator_url, wait_until="domcontentloaded")
+        await _wait_for_idle(page)
         await human_wait()
 
         stores: dict[tuple[str, str], dict[str, str]] = {}
@@ -197,18 +200,35 @@ async def discover_stores_WA_OR(playwright: Any) -> list[dict[str, str]]:
                 if not zip_code:
                     continue
                 name = await _extract_store_name(item, text)
-                key = (name, zip_code)
+                store_id = await _extract_store_id(item, text)
+                key = ((store_id or name), zip_code)
                 if key not in stores:
-                    stores[key] = {"name": name, "zip": zip_code}
+                    stores[key] = {
+                        "name": name,
+                        "zip": zip_code,
+                        "store_id": store_id,
+                    }
 
         for state_name in ("Washington", "Oregon"):
-            search = page.locator(selectors.STORE_SEARCH_INPUT).first
+            await page.goto(store_locator_url, wait_until="domcontentloaded")
+            await _wait_for_idle(page)
+            await human_wait()
+
+            candidates: list[Any] = []
             try:
-                await search.wait_for(state="visible", timeout=10000)
-            except Exception as exc:
+                candidates.append(page.get_by_role("textbox", name=re.compile("zip", re.I)))
+            except Exception:
+                pass
+            try:
+                candidates.append(page.get_by_placeholder(re.compile("zip|store|city", re.I)))
+            except Exception:
+                pass
+            candidates.append(page.locator(selectors.STORE_SEARCH_INPUT))
+            search = await _first_visible(candidates)
+            if search is None:
                 raise RuntimeError(
                     f"Store locator search input unavailable for {state_name}."
-                ) from exc
+                )
 
             try:
                 await search.fill("")
@@ -248,7 +268,7 @@ async def discover_stores_WA_OR(playwright: Any) -> list[dict[str, str]]:
                 )
 
             await page.wait_for_timeout(1500)
-            await page.wait_for_load_state("networkidle")
+            await _wait_for_idle(page)
             await human_wait()
 
             while True:
@@ -256,10 +276,10 @@ async def discover_stores_WA_OR(playwright: Any) -> list[dict[str, str]]:
                 advanced = await paginate_or_scroll(page, selectors.NEXT_BTN)
                 if not advanced:
                     break
-                await page.wait_for_load_state("networkidle")
+                await _wait_for_idle(page)
                 await human_wait()
-            await page.goto(page.url, wait_until="domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+            await page.goto(store_locator_url, wait_until="domcontentloaded")
+            await _wait_for_idle(page)
 
         return sorted(stores.values(), key=lambda entry: (entry["zip"], entry["name"].lower()))
     finally:
@@ -277,12 +297,31 @@ def write_catalog_yaml(path: str | Path, categories: Iterable[dict[str, str]]) -
 
 
 def write_zips_yaml(path: str | Path, stores: Iterable[dict[str, str]]) -> None:
-    """Persist store ZIP codes derived from *stores* to YAML."""
+    """Persist store ZIP codes and metadata derived from *stores* to YAML."""
 
     unique_zips = sorted({store["zip"] for store in stores if store.get("zip")})
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"zips": unique_zips}
+    store_entries: list[dict[str, str]] = []
+    seen: set[tuple[str | None, str | None, str | None]] = set()
+    for store in stores:
+        zip_code = (store.get("zip") or "").strip()
+        name = (store.get("name") or "").strip()
+        store_id = (store.get("store_id") or "").strip() or None
+        key = (store_id, zip_code or None, name or None)
+        if not zip_code or key in seen:
+            continue
+        seen.add(key)
+        entry: dict[str, str] = {"zip": zip_code}
+        if name:
+            entry["store_name"] = name
+        if store_id:
+            entry["store_id"] = store_id
+        store_entries.append(entry)
+
+    payload: dict[str, Any] = {"zips": unique_zips}
+    if store_entries:
+        payload["stores"] = store_entries
     with target.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(payload, handle, sort_keys=False, allow_unicode=True)
 
@@ -325,4 +364,24 @@ async def _extract_zip(item, text: str | None) -> str | None:
                 return match.group(1)
     except Exception:
         pass
+    return None
+
+
+async def _extract_store_id(item, text: str | None) -> str | None:
+    """Best-effort extraction of a Lowe's store identifier."""
+
+    for attribute in ("data-storeid", "data-store-id", "data-store-number"):
+        try:
+            value = await item.get_attribute(attribute)
+        except Exception:
+            value = None
+        if value:
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+
+    if text:
+        match = _STORE_ID_RE.search(text)
+        if match:
+            return match.group(1)
     return None

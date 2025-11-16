@@ -62,6 +62,12 @@ if not "%~1"=="" (
 )
 
 REM --- Run a probe (quick test) ---
+set "DASHBOARD_LOG=%LOG_DIR%\dashboard_%timestamp%.log"
+echo Launching dashboard server ^(logs -> %DASHBOARD_LOG%^)... 
+start "CheapSkater Dashboard" cmd /c ""%CD%\.venv\Scripts\python.exe" -m uvicorn app.dashboard:app --host 0.0.0.0 --port 8000 >> "%DASHBOARD_LOG%" 2>&1"
+timeout /t 3 >nul
+start "" "http://localhost:8000" >nul 2>&1
+
 echo Running probe %EXTRA_ARGS%...
 python -m app.main --probe %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
 if errorlevel 1 (
@@ -70,12 +76,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- Start dashboard & scheduler (blocks until Ctrl+C) ---
-echo Launching dashboard + scheduler (Ctrl+C to stop)...
-start "" "http://localhost:8000" >nul 2>&1
-python -m app.main --dashboard %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
+REM --- Start long-running scraper (Ctrl+C to stop) ---
+echo Launching scraper (Ctrl+C to stop)...
+python -m app.main %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
 if errorlevel 1 (
-    echo Dashboard run failed! Check %LOG_FILE%
+    echo Scraper run failed! Check %LOG_FILE%
     pause
     exit /b 1
 )

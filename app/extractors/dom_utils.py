@@ -86,7 +86,12 @@ def price_to_float(text: str | None) -> float | None:
     return value
 
 
-async def paginate_or_scroll(page: Any, next_selector: str | None, *, max_scroll_attempts: int = 4) -> bool:
+async def paginate_or_scroll(
+    page: Any,
+    next_selector: str | None,
+    *,
+    max_scroll_attempts: int = 4,
+) -> bool:
     """Advance pagination via a next button or perform an infinite scroll step.
 
     Returns ``True`` when additional content is likely available, otherwise ``False``.
@@ -126,6 +131,7 @@ async def paginate_or_scroll(page: Any, next_selector: str | None, *, max_scroll
         await human_wait()
         return True
 
+    # If the explicit pager failed or is missing, fall back to incremental scrolling.
     baseline = await _get_scroll_height(page)
     if baseline is None:
         return False

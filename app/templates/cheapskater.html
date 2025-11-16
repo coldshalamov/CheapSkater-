@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Cheapskater Deals{% endblock %}
+{% block content %}
+<section class="cheapskater-only">
+    <header class="cheapskater-heading">
+        <div>
+            <h1>Saved Deals</h1>
+            <p class="subtitle">Build a Lowe's pickup list with WA &amp; OR clearance finds.</p>
+        </div>
+        <div class="cart-summary-pill" aria-live="polite">
+            <strong>Saved:</strong>
+            <span data-cart-count>{{ cart_total_items }}</span> items – 
+            <span data-cart-total>{{ format_currency(cart_total_price) or "$0.00" }}</span>
+        </div>
+    </header>
+    <p class="cheapskater-note">
+        Browse the <a href="/">Clearance Dashboard</a> and click <em>Save deal</em> on any store to add it to this list.
+    </p>
+    <div id="cart-stores" class="saved-groups">
+        {% if cart_groups %}
+            {% for group in cart_groups %}
+            <article class="cart-store" data-cart-store="{{ group.store_number }}">
+                <div class="cart-store__header">
+                    <h2>{{ group.store_label }}</h2>
+                    <p class="cart-store__meta">{{ group.deals|length }} saved deal{% if group.deals|length != 1 %}s{% endif %}</p>
+                </div>
+                <table class="cart-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Product</th>
+                            <th scope="col">Price</th>
+                            <th scope="col">Qty</th>
+                            <th scope="col">Stock</th>
+                            <th scope="col">Line Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in group.deals %}
+                        <tr class="cart-row" data-deal-id="{{ item.deal_id }}">
+                            <td>
+                                <div class="cart-product">
+                                    <div class="cart-product__name">{{ item.product_name }}</div>
+                                    <div class="cart-product__meta">SKU {{ item.sku }}</div>
+                                </div>
+                            </td>
+                            <td>{{ format_currency(item.price) or "$0.00" }}</td>
+                            <td>
+                                <div class="cart-qty">
+                                    <button type="button" class="cart-btn" data-action="decrement" data-deal-id="{{ item.deal_id }}">–</button>
+                                    <span data-role="quantity">{{ item.quantity }}</span>
+                                    <button type="button" class="cart-btn" data-action="increment" data-deal-id="{{ item.deal_id }}">+</button>
+                                </div>
+                            </td>
+                            <td><span data-role="stock">{{ item.stock }}</span></td>
+                            <td><span data-role="line-total">{{ format_currency(item.price * item.quantity) or "$0.00" }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </article>
+            {% endfor %}
+        {% else %}
+        <p class="empty-state">
+            No saved deals yet. Visit the <a href="/">Clearance Dashboard</a>, pick a store, and click <strong>Save deal</strong>.
+        </p>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    const cartStores = document.getElementById('cart-stores');
+    const summaryCountEls = document.querySelectorAll('[data-cart-count]');
+    const summaryTotalEls = document.querySelectorAll('[data-cart-total]');
+
+    function formatCurrency(value) {
+        const formatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+        return formatter.format(value || 0);
+    }
+
+    function updateCartSummary(count, total) {
+        summaryCountEls.forEach((el) => (el.textContent = count));
+        summaryTotalEls.forEach((el) => (el.textContent = formatCurrency(total)));
+    }
+
+    function findCartRow(dealId) {
+        if (!cartStores) {
+            return null;
+        }
+        return cartStores.querySelector(`[data-deal-id="${CSS.escape(dealId)}"]`);
+    }
+
+    function removeCartRow(dealId, storeNumber) {
+        const row = findCartRow(dealId);
+        if (!row) {
+            return;
+        }
+        const wrapper = row.closest('.cart-store');
+        row.remove();
+        if (wrapper) {
+            const remaining = wrapper.querySelectorAll('[data-deal-id]').length;
+            if (!remaining) {
+                wrapper.remove();
+            } else {
+                const meta = wrapper.querySelector('.cart-store__meta');
+                if (meta) {
+                    meta.textContent = `${remaining} saved deal${remaining === 1 ? '' : 's'}`;
+                }
+            }
+        }
+        if (!cartStores.querySelector('[data-deal-id]') && !cartStores.querySelector('.empty-state')) {
+            const empty = document.createElement('p');
+            empty.className = 'empty-state';
+            empty.innerHTML = 'No saved deals yet. Visit the <a href=\"/\">Clearance Dashboard</a> and click <strong>Save deal</strong>.';
+            cartStores.appendChild(empty);
+        }
+    }
+
+    async function postCartAction(url) {
+        const response = await fetch(url, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+        }
+        return response.json();
+    }
+
+    async function adjustQuantity(dealId, action) {
+        try {
+            const payload = await postCartAction(`/cheapskater/cart/${encodeURIComponent(dealId)}/${action}`);
+            if (!payload?.ok) {
+                return;
+            }
+            updateCartSummary(payload.cart_count, payload.cart_total);
+            if (payload.deleted) {
+                removeCartRow(dealId, payload.store_number);
+                return;
+            }
+            const row = findCartRow(dealId);
+            if (!row) {
+                return;
+            }
+            const qtyEl = row.querySelector('[data-role="quantity"]');
+            const lineEl = row.querySelector('[data-role="line-total"]');
+            if (qtyEl) {
+                qtyEl.textContent = payload.quantity;
+            }
+            if (lineEl) {
+                lineEl.textContent = formatCurrency(payload.line_total ?? 0);
+            }
+        } catch (error) {
+            console.error(`Unable to ${action} quantity`, error);
+        }
+    }
+
+    cartStores?.addEventListener('click', (event) => {
+        const button = event.target.closest('.cart-btn');
+        if (!button) {
+            return;
+        }
+        const { action, dealId } = button.dataset;
+        if (!action || !dealId) {
+            return;
+        }
+        event.preventDefault();
+        adjustQuantity(dealId, action);
+    });
+})();
+</script>
+{% endblock %}

@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine, inspect
+import logging
+
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models_sql import Base
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _apply_sqlite_pragmas(engine: Engine, timeout_value: float) -> None:
+    """Enable WAL mode so dashboard reads do not block while the scraper writes."""
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("PRAGMA journal_mode=WAL"))
+            connection.execute(text("PRAGMA synchronous=NORMAL"))
+            busy_ms = int(timeout_value * 1000)
+            connection.execute(text(f"PRAGMA busy_timeout = {busy_ms}"))
+    except Exception as exc:  # pragma: no cover - defensive; best-effort tuning
+        LOGGER.warning("Unable to configure SQLite pragmas: %s", exc)
 
 
 def get_engine(sqlite_path: str, *, busy_timeout: int | float | None = None) -> Engine:
@@ -14,12 +32,14 @@ def get_engine(sqlite_path: str, *, busy_timeout: int | float | None = None) -> 
 
     timeout_value = float(busy_timeout) if busy_timeout is not None else 30.0
 
-    return create_engine(
+    engine = create_engine(
         f"sqlite:///{sqlite_path}?timeout={timeout_value}",
         future=True,
         pool_pre_ping=True,
         connect_args={"check_same_thread": False, "timeout": timeout_value},
     )
+    _apply_sqlite_pragmas(engine, timeout_value)
+    return engine
 
 
 def make_session(engine: Engine) -> sessionmaker[Session]:

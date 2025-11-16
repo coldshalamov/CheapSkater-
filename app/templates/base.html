@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}CheapSkater Dashboard{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     {% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -19,6 +19,7 @@
             <a href="/" class="nav-link{% if active_scope == 'all' %} active{% endif %}">All Clearance</a>
             <a href="/new-today?state=WA" class="nav-link{% if active_scope == 'new' and state == 'WA' %} active{% endif %}">New Today WA</a>
             <a href="/new-today?state=OR" class="nav-link{% if active_scope == 'new' and state == 'OR' %} active{% endif %}">New Today OR</a>
+            <a href="/cheapskater" class="nav-link{% if active_scope == 'cheapskater' %} active{% endif %}">Saved Deals</a>
         </nav>
     </header>
     <main class="site-main">

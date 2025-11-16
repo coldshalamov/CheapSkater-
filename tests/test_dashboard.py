@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from app.dashboard import _normalize_state, _state_from_zip, app, session_factory
+from app.storage import repo
 from app.storage.models_sql import Observation, Store
 
 
@@ -36,44 +37,62 @@ def test_api_clearance_filters_state(tmp_path) -> None:
         session.add_all([store_wa, store_or])
         session.flush()
 
-        session.add_all(
-            [
-                Observation(
-                    ts_utc=datetime.now(timezone.utc),
-                    store_id=store_wa.id,
-                    store_name=store_wa.name,
-                    zip=store_wa.zip,
-                    sku="sku-wa",
-                    retailer="lowes",
-                    title="Roofing Bundle",
-                    category="Roofing",
-                    product_url="https://example.com/wa",
-                    image_url=None,
-                    price=25.0,
-                    price_was=50.0,
-                    pct_off=0.5,
-                    clearance=True,
-                    availability="In stock",
-                ),
-                Observation(
-                    ts_utc=datetime.now(timezone.utc),
-                    store_id=store_or.id,
-                    store_name=store_or.name,
-                    zip=store_or.zip,
-                    sku="sku-or",
-                    retailer="lowes",
-                    title="Drywall Panel",
-                    category="Drywall",
-                    product_url="https://example.com/or",
-                    image_url=None,
-                    price=10.0,
-                    price_was=15.0,
-                    pct_off=0.33,
-                    clearance=True,
-                    availability="Limited",
-                ),
-            ]
-        )
+        obs_rows = [
+            Observation(
+                ts_utc=datetime.now(timezone.utc),
+                store_id=store_wa.id,
+                store_name=store_wa.name,
+                zip=store_wa.zip,
+                sku="sku-wa",
+                retailer="lowes",
+                title="Roofing Bundle",
+                category="Roofing",
+                product_url="https://example.com/wa",
+                image_url=None,
+                price=25.0,
+                price_was=50.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+            Observation(
+                ts_utc=datetime.now(timezone.utc),
+                store_id=store_or.id,
+                store_name=store_or.name,
+                zip=store_or.zip,
+                sku="sku-or",
+                retailer="lowes",
+                title="Drywall Panel",
+                category="Drywall",
+                product_url="https://example.com/or",
+                image_url=None,
+                price=10.0,
+                price_was=15.0,
+                pct_off=0.33,
+                clearance=True,
+                availability="Limited",
+            ),
+        ]
+        session.add_all(obs_rows)
+        session.commit()
+
+        for obs in obs_rows:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+            )
         session.commit()
 
     client = TestClient(app)

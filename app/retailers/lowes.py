@@ -7,17 +7,18 @@ import random
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error as PlaywrightError
 
 import app.selectors as selectors
 from app.errors import PageLoadError, SelectorChangedError, StoreContextError
 from app.extractors import schemas
-from app.extractors.dom_utils import human_wait, inner_text_safe, paginate_or_scroll
+from app.extractors.dom_utils import human_wait, inner_text_safe
 from app.logging_config import get_logger
+from app.normalizers import normalize_availability
 from app.playwright_env import (
     apply_stealth,
     category_delay_bounds,
@@ -28,6 +29,10 @@ from app.playwright_env import headless_enabled
 
 LOGGER = get_logger(__name__)
 BASE_URL = "https://www.lowes.com"
+GOTO_TIMEOUT_MS = 60000
+BACK_AISLE_PAGE_SIZE = 24
+MAX_BACK_AISLE_PAGES = 80
+MAX_EMPTY_PAGE_RESULTS = 1
 
 
 def _resolve_user_agent() -> str | None:
@@ -50,6 +55,17 @@ _SKU_PATTERNS = (
     re.compile(r"/product/[^/]+-(\d{4,})", re.I),
     re.compile(r"(\d{6,})(?:[/?]|$)"),
 )
+
+
+def _extract_sku_from_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    for pattern in _SKU_PATTERNS:
+        match = pattern.search(value)
+        if match:
+            return match.group(1)
+    return None
+
 
 _STORE_BUTTON_TEXT = re.compile("(set|select|choose|make).{0,10}store", re.I)
 _STORE_BADGE_FALLBACK = re.compile("store|my store|change store", re.I)
@@ -240,9 +256,17 @@ async def _extract_store_meta(card: Any) -> tuple[str | None, str | None, str | 
     if text:
         for line in text.splitlines():
             cleaned = line.strip()
-            if cleaned and not cleaned.startswith(("Show Less", "Show More")):
-                store_name = cleaned
-                break
+            lowered = cleaned.lower()
+            if not cleaned:
+                continue
+            if cleaned.isdigit():
+                continue
+            if "miles" in lowered:
+                continue
+            if lowered.startswith(("show less", "show more", "set as", "store:#")):
+                continue
+            store_name = cleaned
+            break
 
     store_id = await _safe_get_attribute(card, "data-storeid")
     if not store_id and text:
@@ -263,7 +287,24 @@ async def _extract_store_meta(card: Any) -> tuple[str | None, str | None, str | 
     return store_name, store_id, match_zip, text
 
 
-async def _find_store_result_button(page: Any, zip_code: str) -> _StoreChoice:
+def _clean_store_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    collapsed = " ".join(value.split())
+    if not collapsed:
+        return None
+    lowered = collapsed.lower()
+    if "find a store" in lowered and "near me" in lowered:
+        return None
+    return collapsed
+
+
+async def _find_store_result_button(
+    page: Any,
+    zip_code: str,
+    *,
+    preferred_store_id: str | None = None,
+) -> _StoreChoice:
     """Return the store selection choice that matches *zip_code*."""
 
     try:
@@ -323,6 +364,18 @@ async def _find_store_result_button(page: Any, zip_code: str) -> _StoreChoice:
             raw_text=card_text,
         )
 
+        trimmed_store_id = store_id.strip() if store_id else None
+
+        if preferred_store_id and trimmed_store_id and trimmed_store_id == preferred_store_id.strip():
+            LOGGER.info(
+                "Selected preferred store '%s' (store_id=%s) for zip=%s via candidate index=%s",
+                store_name or "unknown",
+                trimmed_store_id,
+                zip_code,
+                idx,
+            )
+            return choice
+
         if match_zip and match_zip.strip() == zip_code:
             LOGGER.info(
                 "Selected matching store '%s' (store_id=%s) for zip=%s via candidate index=%s",
@@ -347,6 +400,19 @@ async def _find_store_result_button(page: Any, zip_code: str) -> _StoreChoice:
     return _StoreChoice(button=None, store_id=None, store_name=None, zip_code=None)
 
 
+async def _wait_for_store_cards(page: Any, timeout: int = 20000) -> bool:
+    """Wait for the store result grid to become visible."""
+
+    if not selectors.STORE_RESULT_ITEM:
+        return False
+
+    try:
+        await page.wait_for_selector(selectors.STORE_RESULT_ITEM, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_random_exponential(multiplier=0.5, max=5),
@@ -357,6 +423,7 @@ async def set_store_context(
     zip_code: str,
     *,
     user_agent: str | None = None,
+    store_hint: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Set the Lowe's store context for *zip_code* and return (store_id, store_name)."""
 
@@ -373,7 +440,7 @@ async def set_store_context(
             )
 
     try:
-        await page.goto("https://www.lowes.com/", wait_until="domcontentloaded")
+        await page.goto("https://www.lowes.com/", wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
     except Exception as exc:  # pragma: no cover - network failure
         raise StoreContextError(zip_code=zip_code) from exc
 
@@ -429,6 +496,10 @@ async def set_store_context(
         search_locators.append(page.get_by_role("textbox", name=re.compile("zip", re.I)))
     except Exception:
         pass
+    try:
+        search_locators.append(page.get_by_placeholder(re.compile("zip|store|city", re.I)))
+    except Exception:
+        pass
     for selector in ("input[name*='zip']", "input[id*='zip']", "input[placeholder*='ZIP']"):
         search_locators.append(page.locator(selector))
 
@@ -441,18 +512,38 @@ async def set_store_context(
     except Exception as exc:
         raise StoreContextError(zip_code=zip_code) from exc
 
-    await human_wait(800, 1600)
-    await _jitter_mouse(page)
+    submit_attempts = 0
+    while submit_attempts < 2:
+        submit_attempts += 1
+        await human_wait(800, 1600)
+        await _jitter_mouse(page)
 
-    try:
-        await zip_input.press("Enter")
-    except Exception:
         try:
-            await zip_input.evaluate("(el) => el.form && el.form.submit && el.form.submit()")
+            await zip_input.press("Enter")
+        except Exception:
+            try:
+                await zip_input.evaluate("(el) => el.form && el.form.submit && el.form.submit()")
+            except Exception:
+                pass
+
+        await human_wait(600, 1200)
+        if await _wait_for_store_cards(page, timeout=14000):
+            break
+
+        LOGGER.warning(
+            "Store results did not load for zip=%s on attempt=%s; retrying form submission",
+            zip_code,
+            submit_attempts,
+        )
+        try:
+            await zip_input.fill("")
         except Exception:
             pass
+        await human_wait(200, 400)
+        await zip_input.fill(zip_code)
 
-    await human_wait(800, 1400)
+    if not await _wait_for_store_cards(page, timeout=12000):
+        raise StoreContextError(zip_code=zip_code)
 
     option_locators: list[Any] = []
     option_locators.append(page.locator("button:has-text('Set Store')"))
@@ -463,7 +554,12 @@ async def set_store_context(
     except Exception:
         pass
 
-    store_choice = await _find_store_result_button(page, zip_code)
+    target_store_id = (store_hint or {}).get("store_id")
+    store_choice = await _find_store_result_button(
+        page,
+        zip_code,
+        preferred_store_id=target_store_id,
+    )
     store_button = store_choice.button
     if store_button is None:
         LOGGER.warning("Falling back to generic store button selection | zip=%s", zip_code)
@@ -509,12 +605,17 @@ async def set_store_context(
     else:
         LOGGER.warning("Store badge locator missing after selecting zip=%s", zip_code)
 
+    hinted_name = (store_hint or {}).get("store_name")
+    hinted_id = (store_hint or {}).get("store_id")
+
     if not store_name:
-        store_name = store_choice.store_name or f"Lowe's ({zip_code})"
+        store_name = store_choice.store_name or hinted_name or f"Lowe's ({zip_code})"
     if store_id is None:
-        store_id = store_choice.store_id or f"{zip_code}:{store_name.strip()}"
+        store_id = store_choice.store_id or hinted_id or f"{zip_code}:{store_name.strip()}"
     if store_id is None:
         store_id = f"{zip_code}:{store_name.strip()}"
+
+    store_name = _clean_store_name(store_name) or hinted_name or f"Lowe's ({zip_code})"
 
     _cache_store_selection(zip_code, store_id, store_name)
 
@@ -527,14 +628,16 @@ async def set_store_context(
     return store_id.strip(), store_name.strip()
 
 
-def _prepare_category_url(url: str, store_id: str | None) -> str:
+def _prepare_category_url(url: str, store_id: str | None, *, offset: int = 0) -> str:
     parsed = urlparse(url)
     params = dict(parse_qsl(parsed.query, keep_blank_values=True))
     params.setdefault("pickupType", "pickupToday")
     params.setdefault("availability", "pickupToday")
-    params.setdefault("inStock", "true")
+    params["inStock"] = "1"
+    params.setdefault("rollUpVariants", "0")
     if store_id and store_id.strip():
         params.setdefault("storeNumber", store_id.strip())
+    params["offset"] = str(max(offset, 0))
     rebuilt = parsed._replace(query=urlencode(params, doseq=True))
     return rebuilt.geturl()
 
@@ -568,47 +671,68 @@ async def scrape_category(
 
     _ensure_selectors_configured()
 
-    target_url = _prepare_category_url(url, store_id)
-    LOGGER.debug(
-        "Loading category page",
-        extra={"zip": zip_code, "category": category_name, "url": target_url},
-    )
-
-    try:
-        await page.goto(target_url, wait_until="domcontentloaded")
-    except Exception as exc:  # pragma: no cover - navigation failure
-        raise PageLoadError(url=target_url, zip_code=zip_code, category=category_name) from exc
-
-    await _safe_wait_for_load(page, "networkidle")
-    await human_wait(400, 900)
-
     products: list[dict[str, Any]] = []
     seen_keys: set[tuple[str | None, str | None]] = set()
-    pages = 0
+    page_index = 0
+    offset = 0
+    empty_pages = 0
 
-    while True:
+    while page_index < MAX_BACK_AISLE_PAGES:
+        target_url = _prepare_category_url(url, store_id, offset=offset)
+        LOGGER.debug(
+            "Loading category page",
+            extra={
+                "zip": zip_code,
+                "category": category_name,
+                "url": target_url,
+                "offset": offset,
+                "page": page_index + 1,
+            },
+        )
+
+        try:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+        except Exception as exc:  # pragma: no cover - navigation failure
+            raise PageLoadError(url=target_url, zip_code=zip_code, category=category_name) from exc
+
+        await _safe_wait_for_load(page, "networkidle")
+        await _wait_for_product_grid(page)
+        await human_wait(260, 540)
+
+        page_index += 1
         page_rows = await _extract_products_from_dom(
             page,
             category_name=category_name,
             zip_code=zip_code,
+            store_id=store_id,
             clearance_threshold=clearance_threshold,
             seen_keys=seen_keys,
         )
-        if page_rows:
+        row_count = len(page_rows)
+        if row_count:
             products.extend(page_rows)
-            LOGGER.debug(
-                "Extracted %s Back Aisle rows on page %s",
-                len(page_rows),
-                pages + 1,
-                extra={"zip": zip_code, "category": category_name, "url": target_url},
-            )
+            empty_pages = 0
+        else:
+            empty_pages += 1
+        LOGGER.info(
+            "Back Aisle page=%s rows=%s offset=%s zip=%s",
+            page_index,
+            row_count,
+            offset,
+            zip_code,
+            extra={
+                "zip": zip_code,
+                "category": category_name,
+                "url": target_url,
+                "offset": offset,
+                "page": page_index,
+            },
+        )
 
-        pages += 1
-        advanced = await paginate_or_scroll(page, selectors.NEXT_BTN)
-        if not advanced:
+        if row_count < BACK_AISLE_PAGE_SIZE or empty_pages > MAX_EMPTY_PAGE_RESULTS:
             break
 
-        await human_wait()
+        offset += BACK_AISLE_PAGE_SIZE
 
     if not products:
         LOGGER.info(
@@ -634,6 +758,43 @@ async def _extract_products_from_dom(
     *,
     category_name: str,
     zip_code: str,
+    store_id: str | None,
+    clearance_threshold: float,
+    seen_keys: set[tuple[str | None, str | None]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    rows.extend(
+        await _extract_products_from_json_scripts(
+            page,
+            category_name=category_name,
+            zip_code=zip_code,
+            store_id=store_id,
+            clearance_threshold=clearance_threshold,
+            seen_keys=seen_keys,
+        )
+    )
+
+    rows.extend(
+        await _extract_rows_from_cards(
+            page,
+            category_name=category_name,
+            zip_code=zip_code,
+            store_id=store_id,
+            clearance_threshold=clearance_threshold,
+            seen_keys=seen_keys,
+        )
+    )
+
+    return rows
+
+
+async def _extract_products_from_json_scripts(
+    page: Any,
+    *,
+    category_name: str,
+    zip_code: str,
+    store_id: str | None,
     clearance_threshold: float,
     seen_keys: set[tuple[str | None, str | None]],
 ) -> list[dict[str, Any]]:
@@ -665,6 +826,7 @@ async def _extract_products_from_dom(
                 product,
                 category_name=category_name,
                 zip_code=zip_code,
+                store_id=store_id,
                 clearance_threshold=clearance_threshold,
             )
             if row is None:
@@ -677,6 +839,49 @@ async def _extract_products_from_dom(
                 continue
             seen_keys.add(key)
             rows.append(row)
+
+    return rows
+
+
+async def _extract_rows_from_cards(
+    page: Any,
+    *,
+    category_name: str,
+    zip_code: str,
+    store_id: str | None,
+    clearance_threshold: float,
+    seen_keys: set[tuple[str | None, str | None]],
+) -> list[dict[str, Any]]:
+    selector = selectors.CARD
+    if not selector:
+        return []
+
+    try:
+        cards = page.locator(selector)
+        total = await cards.count()
+    except Exception:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for index in range(total):
+        card = cards.nth(index)
+        row = await _card_locator_to_row(
+            card,
+            category_name=category_name,
+            zip_code=zip_code,
+            store_id=store_id,
+            clearance_threshold=clearance_threshold,
+        )
+        if row is None:
+            continue
+        key = (
+            row.get("sku") or row.get("product_url"),
+            row.get("product_url"),
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        rows.append(row)
 
     return rows
 
@@ -717,11 +922,34 @@ def _normalize_image_url(value: Any) -> str | None:
     return value
 
 
+def _ensure_store_product_url(url: str | None, store_id: str | None) -> str | None:
+    if not url:
+        return None
+
+    absolute = urljoin(BASE_URL, url)
+    if not store_id:
+        return absolute
+
+    parsed = urlparse(absolute)
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    has_store_param = any(key.lower() == "storenumber" for key, _ in params)
+    if not has_store_param and store_id and store_id.strip():
+        params.append(("storeNumber", store_id.strip()))
+
+    if not params:
+        return absolute
+
+    query_text = urlencode(params, doseq=True)
+    updated = parsed._replace(query=query_text)
+    return urlunparse(updated)
+
+
 def _product_dict_to_row(
     product: dict[str, Any],
     *,
     category_name: str,
     zip_code: str,
+    store_id: str | None,
     clearance_threshold: float,
 ) -> dict[str, Any] | None:
     if not isinstance(product, dict):
@@ -738,15 +966,14 @@ def _product_dict_to_row(
         return None
 
     price_was = schemas.parse_price(str(offers.get("priceWas")))
-    product_url = offers.get("url") or product.get("url")
-    if product_url:
-        product_url = urljoin(BASE_URL, product_url)
+    product_url = _ensure_store_product_url(offers.get("url") or product.get("url"), store_id)
 
     image_url = _normalize_image_url(product.get("image"))
     sku = product.get("sku") or product.get("productID") or product.get("itemNumber")
-    availability = offers.get("availability") or ""
+    availability = normalize_availability(offers.get("availability"))
     title = (product.get("name") or product.get("description") or "Lowe's item").strip()
     pct_off = schemas.compute_pct_off(price, price_was)
+    clearance_flag = pct_off is None or pct_off >= max(clearance_threshold, 0)
 
     return {
         "retailer": "lowes",
@@ -759,9 +986,121 @@ def _product_dict_to_row(
         "sku": sku,
         "category": category_name,
         "zip": zip_code,
-        "clearance": True,
+        "clearance": clearance_flag,
         "pct_off": pct_off,
     }
+
+
+async def _card_locator_to_row(
+    card: Any,
+    *,
+    category_name: str,
+    zip_code: str,
+    store_id: str | None,
+    clearance_threshold: float,
+) -> dict[str, Any] | None:
+    title = await _first_card_text(card, (selectors.TITLE,))
+    if not title:
+        fallback_text = await inner_text_safe(card)
+        if not fallback_text:
+            return None
+        title = fallback_text.splitlines()[0].strip()
+
+    price_text = await _first_card_text(card, (selectors.PRICE, selectors.PRICE_ALT))
+    price = schemas.parse_price(price_text)
+    if price is None:
+        return None
+
+    was_text = await _first_card_text(card, (selectors.WAS_PRICE,))
+    price_was = schemas.parse_price(was_text)
+
+    availability = normalize_availability(await _first_card_text(card, (selectors.AVAIL,)))
+    product_url = await _extract_card_href(card)
+    product_url = _ensure_store_product_url(product_url, store_id)
+    image_url = await _extract_card_image(card)
+    sku = await _extract_card_sku(card, product_url)
+    pct_off = schemas.compute_pct_off(price, price_was)
+    clearance_flag = pct_off is None or pct_off >= max(clearance_threshold, 0)
+
+    return {
+        "retailer": "lowes",
+        "title": title.strip(),
+        "price": price,
+        "price_was": price_was,
+        "availability": (availability or "").strip(),
+        "image_url": image_url,
+        "product_url": product_url,
+        "sku": sku,
+        "category": category_name,
+        "zip": zip_code,
+        "clearance": clearance_flag,
+        "pct_off": pct_off,
+    }
+
+
+async def _first_card_text(card: Any, selectors_to_try: tuple[str, ...]) -> str | None:
+    for selector in selectors_to_try:
+        if not selector:
+            continue
+        locator = await _locator_or_none(card, selector)
+        if locator is None:
+            continue
+        text = await inner_text_safe(locator)
+        if text:
+            return text
+    return None
+
+
+async def _extract_card_href(card: Any) -> str | None:
+    locator = await _locator_or_none(card, selectors.LINK)
+    href: str | None = None
+    if locator is not None:
+        href = await _safe_get_attribute(locator, "href")
+        if not href:
+            href = await _safe_get_attribute(locator, "data-href")
+    if not href:
+        return None
+    return urljoin(BASE_URL, href)
+
+
+async def _extract_card_image(card: Any) -> str | None:
+    locator = await _locator_or_none(card, selectors.IMG)
+    if locator is None:
+        return None
+    for attr in ("src", "data-src", "data-original", "data-srcset"):
+        value = await _safe_get_attribute(locator, attr)
+        if value:
+            candidate = value.split(",")[0].strip()
+            normalized = _normalize_image_url(candidate)
+            if normalized:
+                return normalized
+    return None
+
+
+async def _extract_card_sku(card: Any, product_url: str | None) -> str | None:
+    dataset_attributes = (
+        "data-itemid",
+        "data-item-id",
+        "data-sku",
+        "data-sku-id",
+        "data-model-id",
+        "data-modelnumber",
+        "data-product-id",
+        "data-productid",
+        "data-itemnumber",
+    )
+    for attr in dataset_attributes:
+        value = await _safe_get_attribute(card, attr)
+        sku = _extract_sku_from_text(value)
+        if sku:
+            return sku
+
+    sku = _extract_sku_from_text(product_url)
+    if sku:
+        return sku
+
+    card_text = await inner_text_safe(card)
+    return _extract_sku_from_text(card_text)
 
 async def run_for_zip(
     playwright: Any | None,
@@ -771,6 +1110,7 @@ async def run_for_zip(
     clearance_threshold: float = 0.25,
     browser: Any | None = None,
     shared_context: Any | None = None,
+    store_hints: dict[str, list[dict[str, str]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Execute the Lowe's workflow for a single ZIP."""
 
@@ -808,12 +1148,52 @@ async def run_for_zip(
                     owns_context = True
 
                 page = await context.new_page()
+                page_crashed = False
+                crash_reason = "page closed unexpectedly"
+
+                def _mark_crash(reason: str) -> None:
+                    nonlocal page_crashed, crash_reason
+                    if not page_crashed:
+                        crash_reason = reason
+                        page_crashed = True
+                        LOGGER.error(
+                            "Playwright page event=%s zip=%s",
+                            reason,
+                            zip_code,
+                        )
+
+                try:
+                    page.on("crash", lambda _: _mark_crash("crash"))
+                except Exception:
+                    pass
+                try:
+                    page.on("close", lambda _: _mark_crash("page_close"))
+                except Exception:
+                    pass
+
+                def _ensure_page_active() -> None:
+                    if page_crashed:
+                        raise PlaywrightError(f"browser page inactive ({crash_reason})")
+
                 await _jitter_mouse(page)
+                store_hint_entry: dict[str, str] | None = None
+                if store_hints:
+                    hinted = store_hints.get(zip_code)
+                    if hinted:
+                        store_hint_entry = hinted[0]
+                        LOGGER.info(
+                            "Using store hint for zip=%s -> %s (%s)",
+                            zip_code,
+                            store_hint_entry.get("store_name"),
+                            store_hint_entry.get("store_id"),
+                        )
                 store_id, store_name = await set_store_context(
                     page,
                     zip_code,
                     user_agent=user_agent,
+                    store_hint=store_hint_entry,
                 )
+                _ensure_page_active()
 
                 for category in categories:
                     name = (category or {}).get("name")
@@ -835,6 +1215,7 @@ async def run_for_zip(
                     )
                     async def _scrape() -> list[dict[str, Any]]:
                         await human_wait()
+                        _ensure_page_active()
                         return await scrape_category(
                             page,
                             url,
@@ -845,6 +1226,7 @@ async def run_for_zip(
                         )
 
                     category_rows = await _scrape()
+                    _ensure_page_active()
                     for row in category_rows:
                         row.setdefault("store_id", store_id)
                         row.setdefault("store_name", store_name)

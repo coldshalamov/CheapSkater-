@@ -18,115 +18,573 @@
     </div>
 
     <form method="get" action="{{ request.url.path if request else '/' }}" class="filters" role="search">
-        <label for="state" class="filter-label">State</label>
-        <select id="state" name="state" onchange="this.form.submit()">
-            {% for option in state_options %}
-            <option value="{{ option if option != 'ALL' else '' }}"{% if (state or 'ALL') == option %} selected{% endif %}>{{ option }}</option>
-            {% endfor %}
-        </select>
-        <label for="category" class="filter-label">Category</label>
-        <select id="category" name="category" onchange="this.form.submit()">
-            <option value="">All Categories</option>
-            {% for option in categories %}
-            <option value="{{ option }}"{% if category == option %} selected{% endif %}>{{ option }}</option>
-            {% endfor %}
-        </select>
+        <div class="filter-group">
+            <label for="state" class="filter-label">State</label>
+            <select id="state" name="state">
+                {% for option in state_options %}
+                <option value="{{ option if option != 'ALL' else '' }}"{% if (state or 'ALL') == option %} selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="category" class="filter-label">Category</label>
+            <select id="category" name="category">
+                <option value="">All Categories</option>
+                {% for option in categories %}
+                <option value="{{ option }}"{% if category == option %} selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="time_window" class="filter-label">Date Added</label>
+            <select id="time_window" name="time_window">
+                {% for value, label, _ in time_filter_options %}
+                <option value="{{ value }}"{% if filters.time_window == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="discount_filter" class="filter-label">Discount</label>
+            <select id="discount_filter" name="discount_filter">
+                {% for value, label, _, _ in discount_filter_options %}
+                <option value="{{ value }}"{% if filters.discount_choice == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <div class="custom-range" data-target="discount"{% if filters.discount_choice != 'custom' %} hidden{% endif %}>
+                <label for="discount_min" class="sr-only">Min discount %</label>
+                <input type="number" id="discount_min" name="discount_min" min="0" max="100" placeholder="Min %" value="{{ filters.discount_min_pct or '' }}">
+            </div>
+        </div>
+        <div class="filter-group">
+            <label for="stock_filter" class="filter-label">Stock</label>
+            <select id="stock_filter" name="stock_filter">
+                {% for value, label, _, _ in stock_filter_options %}
+                <option value="{{ value }}"{% if filters.stock_choice == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <div class="custom-range" data-target="stock"{% if filters.stock_choice != 'custom' %} hidden{% endif %}>
+                <label for="stock_min" class="sr-only">Min stock</label>
+                <input type="number" id="stock_min" name="stock_min" min="0" placeholder="Min" value="{{ filters.stock_min or '' }}">
+                <label for="stock_max" class="sr-only">Max stock</label>
+                <input type="number" id="stock_max" name="stock_max" min="0" placeholder="Max" value="{{ filters.stock_max or '' }}">
+            </div>
+        </div>
+        <div class="filter-group search-field">
+            <label for="search" class="filter-label">Search</label>
+            <input type="search" id="search" placeholder="SKU, store, keyword…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn tertiary">Apply Filters</button>
+        </div>
     </form>
+    <div class="saved-deals-hint">
+        <strong>Plan your run:</strong>
+        Click <em>Save deal</em> next to any store to build a pickup list, then open the
+        <a href="/cheapskater">Saved Deals</a> page to review everything grouped by store.
+    </div>
+    <div class="saved-toast" id="saved-toast" role="status" aria-live="polite" hidden></div>
 
     <p class="last-updated">Last updated: {{ last_updated.strftime('%b %d, %Y %I:%M %p %Z') if last_updated else 'No observations yet' }}</p>
 
-    {% if items %}
-    <div class="table-wrapper">
-        <table class="items-table" data-sortable>
-            <thead>
-                <tr>
-                    <th scope="col" data-sort="string">Item</th>
-                    <th scope="col" data-sort="number">Price</th>
-                    <th scope="col" data-sort="number">Was</th>
-                    <th scope="col" data-sort="number">% Off</th>
-                    <th scope="col" data-sort="string">State</th>
-                    <th scope="col" data-sort="string">ZIP</th>
-                    <th scope="col" data-sort="string">Store</th>
-                    <th scope="col" data-sort="string">Availability</th>
-                    <th scope="col" data-sort="string">Updated</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in items %}
-                {% set state_value = state_from_zip(item.zip) %}
-                {% set pct_value = (item.pct_off * 100) if item.pct_off is not none else None %}
-                <tr>
-                    <td data-label="Item" data-sort-value="{{ item.title|lower }}">
-                        <a href="{{ item.product_url }}" target="_blank" rel="noopener" class="item-link">{{ item.title }}</a>
-                        <div class="item-meta">
-                            <span class="category">{{ item.category or 'Uncategorised' }}</span>
-                            {% if item.sku %}<span class="sku">SKU {{ item.sku }}</span>{% endif %}
+    {% set initial_list = initial_groups or [] %}
+    <div id="cards-grid" class="cards-grid" aria-live="polite" data-initial-count="{{ initial_list|length }}">
+        {% for group in initial_list %}
+        {% set keywords = (group.title or '') ~ ' ' ~ (group.sku or '') %}
+        {% for store in group.stores %}
+            {% set keywords = keywords ~ ' ' ~ (store.store_name or '') ~ ' ' ~ (store.store_state or '') ~ ' ' ~ (store.store_zip or '') %}
+        {% endfor %}
+        {% set min_price = format_currency(group.min_price) %}
+        {% set max_price = format_currency(group.max_price) if group.max_price is not none else None %}
+        {% set min_was = format_currency(group.min_price_was) if group.min_price_was is not none else None %}
+        {% set max_was = format_currency(group.max_price_was) if group.max_price_was is not none else None %}
+        {% set price_spread = format_currency(group.price_spread) if group.price_spread is not none else None %}
+        {% set min_savings = format_currency(group.min_savings) if group.min_savings is not none else None %}
+        {% set max_savings = format_currency(group.max_savings) if group.max_savings is not none else None %}
+        {% if group.min_pct_off is not none %}
+            {% set min_pct = (group.min_pct_off * 100)|round(0, 'floor') %}
+            {% if group.max_pct_off is not none and group.max_pct_off != group.min_pct_off %}
+                {% set max_pct = (group.max_pct_off * 100)|round(0, 'floor') %}
+            {% else %}
+                {% set max_pct = None %}
+            {% endif %}
+        {% else %}
+            {% set min_pct = None %}
+            {% set max_pct = None %}
+        {% endif %}
+        <article class="product-card" data-keywords="{{ keywords|lower }}">
+            <div class="product-card__header">
+                <div class="product-card__image">
+                    {% if group.image_url %}
+                    <img src="{{ group.image_url }}" alt="{{ group.title }}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;">
+                    {% else %}
+                    <div class="image-placeholder">No Image</div>
+                    {% endif %}
+                </div>
+                <div class="product-card__body">
+                    <h2 class="product-title">
+                        {% if group.best_product_url %}
+                        <a href="{{ group.best_product_url }}" target="_blank" rel="noopener">{{ group.title }}</a>
+                        {% else %}
+                        {{ group.title }}
+                        {% endif %}
+                    </h2>
+                    <div class="product-meta">
+                        <span class="pill category">{{ group.category or 'Uncategorised' }}</span>
+                        <span class="pill sku">SKU {{ group.sku }}</span>
+                        <span class="pill locations">{{ group.locations }} store{% if group.locations != 1 %}s{% endif %}</span>
+                    </div>
+                    <div class="product-pricing">
+                        <div class="price-current">
+                            {% if min_price %}
+                                {{ min_price }}{% if max_price and max_price != min_price %} – {{ max_price }}{% endif %}
+                            {% else %}
+                                Price unavailable
+                            {% endif %}
                         </div>
-                    </td>
-                    <td data-label="Price" data-sort-value="{{ item.price if item.price is not none else 0 }}">
-                        {% if item.price is not none %}${{ '%.2f'|format(item.price) }}{% else %}—{% endif %}
-                    </td>
-                    <td data-label="Was" data-sort-value="{{ item.price_was if item.price_was is not none else 0 }}">
-                        {% if item.price_was is not none %}${{ '%.2f'|format(item.price_was) }}{% else %}—{% endif %}
-                    </td>
-                    <td data-label="% Off" data-sort-value="{{ pct_value if pct_value is not none else 0 }}">
-                        {% if pct_value is not none %}{{ '%.0f'|format(pct_value) }}%{% else %}—{% endif %}
-                    </td>
-                    <td data-label="State" data-sort-value="{{ state_value or '' }}">{{ state_value or '—' }}</td>
-                    <td data-label="ZIP" data-sort-value="{{ item.zip or '' }}">{{ item.zip or '—' }}</td>
-                    <td data-label="Store" data-sort-value="{{ item.store_name|lower if item.store_name else '' }}">
-                        <span class="store-name">{{ item.store_name or 'Unknown store' }}</span>
-                    </td>
-                    <td data-label="Availability" data-sort-value="{{ item.availability|lower if item.availability else '' }}">
-                        {{ item.availability or 'Unknown' }}
-                    </td>
-                    <td data-label="Updated" data-sort-value="{{ item.ts_utc.isoformat() if item.ts_utc else '' }}">
-                        {{ item.ts_utc.strftime('%b %d %I:%M %p') if item.ts_utc else '—' }}
-                    </td>
-                </tr>
+                        {% if min_was %}
+                        <div class="price-was">
+                            Regular {{ min_was }}{% if max_was and max_was != min_was %} – {{ max_was }}{% endif %}
+                        </div>
+                        {% endif %}
+                        {% if price_spread %}
+                        <div class="price-spread">Spread {{ price_spread }}</div>
+                        {% endif %}
+                        {% if min_savings %}
+                        <div class="price-savings">
+                            Save {{ min_savings }}{% if max_savings and max_savings != min_savings %} – {{ max_savings }}{% endif %}
+                        </div>
+                        {% endif %}
+                        {% if min_pct is not none %}
+                        <span class="discount-badge">
+                            {% if max_pct and max_pct != min_pct %}
+                                {{ min_pct|int }}%–{{ max_pct|int }}% off
+                            {% else %}
+                                {{ min_pct|int }}% off
+                            {% endif %}
+                        </span>
+                        {% endif %}
+                        <div class="store-count-note">
+                            {{ group.locations }} store{% if group.locations != 1 %}s{% endif %} with this price
+                        </div>
+                    </div>
+                    <div class="product-timeline">
+                        {% if group.added_at %}
+                        <span>Added {{ format_timestamp(group.added_at, show_time=False) }}{% if group.days_since_added is not none %} ({{ group.days_since_added }}d ago){% endif %}</span>
+                        {% endif %}
+                        {% if group.last_seen %}
+                        <span>Updated {{ format_timestamp(group.last_seen) }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="store-list">
+                {% for store in group.stores %}
+                {% set availability_text = store.availability or 'Unknown' %}
+                {% set availability_class = 'availability-' ~ availability_text|lower|replace(' ', '-') %}
+                {% set store_label = store.store_label or store_label_builder(store) %}
+                {% set store_tip = store.store_tooltip or store_tooltip_builder(store) %}
+                {% set store_link = store.store_product_url or store_url_builder(store.product_url, store.store_id) %}
+                {% set store_number = store.store_id or store.store_number %}
+                {% if store.price is not none and store.price_was %}
+                    {% set store_savings = store.price_was - store.price %}
+                {% else %}
+                    {% set store_savings = None %}
+                {% endif %}
+                <div class="store-row">
+                    <div class="store-details">
+                        <div class="store-name" title="{{ store_tip }}">{{ store_label or 'Unknown store' }}</div>
+                        <div class="store-location">
+                            {{ store.store_state or state_from_zip(store.store_zip) or '–' }} {% if store.store_zip %}{{ store.store_zip }}{% endif %}
+                        </div>
+                    </div>
+                    <div class="store-pricing">
+                        {% if store.price is not none %}
+                        <div class="price">{{ format_currency(store.price) }}</div>
+                        {% else %}
+                        <div class="price muted">–</div>
+                        {% endif %}
+                        {% if store.price_was %}
+                        <div class="was-price">Was {{ format_currency(store.price_was) }}</div>
+                        {% endif %}
+                        {% if store_savings %}
+                        <div class="store-savings">Save {{ format_currency(store_savings) }}</div>
+                        {% endif %}
+                        {% if store.prev_price %}
+                        <div class="prev-price">Prev {{ format_currency(store.prev_price) }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="store-meta">
+                        <span class="availability-badge {{ availability_class }}">{{ availability_text }}</span>
+                        {% if store.stock_estimate is not none %}
+                        <span class="stock-pill">Stock: {{ store.stock_estimate }}</span>
+                        {% elif store.stock_label %}
+                        <span class="stock-pill">{{ store.stock_label }}</span>
+                        {% endif %}
+                        {% if store.updated_at %}
+                        <span class="timestamp">Updated {{ format_timestamp(store.updated_at) }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="store-action">
+                        <a class="btn small" href="{{ store_link }}" target="_blank" rel="noopener">View Store Deal</a>
+                        {% if store_number and (store.sku or group.sku) %}
+                        <button
+                            type="button"
+                            class="btn tertiary small js-save-deal"
+                            data-store="{{ store_number }}"
+                            data-sku="{{ store.sku or group.sku }}"
+                        >
+                            Save deal
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
                 {% endfor %}
-            </tbody>
-        </table>
+            </div>
+        </article>
+        {% endfor %}
     </div>
-    {% else %}
-    <p class="no-results">No clearance items match your filters. Try another state or category.</p>
-    {% endif %}
+    <div id="scroll-sentinel" aria-hidden="true"></div>
+    <p class="no-results" id="no-results-message" hidden>No clearance items match your filters. Try another search.</p>
+    <script id="group-data" type="application/json">{{ group_json|safe }}</script>
 </section>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const tables = document.querySelectorAll('table[data-sortable]');
-  tables.forEach((table) => {
-    table.querySelectorAll('th[data-sort]').forEach((header, index) => {
-      header.addEventListener('click', () => {
-        const sortType = header.dataset.sort;
-        const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        const ascending = header.dataset.order !== 'asc';
-        rows.sort((a, b) => {
-          const aCell = a.children[index];
-          const bCell = b.children[index];
-          const aValue = aCell.dataset.sortValue ?? aCell.textContent.trim();
-          const bValue = bCell.dataset.sortValue ?? bCell.textContent.trim();
-          if (sortType === 'number') {
-            const aNum = parseFloat(aValue) || 0;
-            const bNum = parseFloat(bValue) || 0;
-            return ascending ? aNum - bNum : bNum - aNum;
-          }
-          return ascending
-            ? aValue.localeCompare(bValue)
-            : bValue.localeCompare(aValue);
-        });
-        tbody.replaceChildren(...rows);
-        table.querySelectorAll('th[data-sort]').forEach((th) => {
-          th.dataset.order = '';
-        });
-        header.dataset.order = ascending ? 'asc' : 'desc';
-      });
-    });
+  const dataEl = document.getElementById('group-data');
+  const grid = document.getElementById('cards-grid');
+  const sentinel = document.getElementById('scroll-sentinel');
+  const searchInput = document.getElementById('search');
+  const noResultsMessage = document.getElementById('no-results-message');
+  const discountSelect = document.getElementById('discount_filter');
+  const stockSelect = document.getElementById('stock_filter');
+  const discountCustom = document.querySelector('.custom-range[data-target="discount"]');
+  const stockCustom = document.querySelector('.custom-range[data-target="stock"]');
+  const BATCH_SIZE = 30;
+  const toastEl = document.getElementById('saved-toast');
+  let toastTimerId;
+
+  const showToast = (message) => {
+    if (!toastEl) {
+      return;
+    }
+    toastEl.textContent = message;
+    toastEl.hidden = false;
+    toastEl.classList.add('visible');
+    if (toastTimerId) {
+      clearTimeout(toastTimerId);
+    }
+    toastTimerId = setTimeout(() => {
+      toastEl.classList.remove('visible');
+      toastEl.hidden = true;
+    }, 3200);
+  };
+
+  if (!grid || !dataEl) {
+    return;
+  }
+
+  const toggleCustomRange = (selectEl, container) => {
+    if (!selectEl || !container) return;
+    container.hidden = selectEl.value !== 'custom';
+  };
+
+  toggleCustomRange(discountSelect, discountCustom);
+  toggleCustomRange(stockSelect, stockCustom);
+
+  discountSelect?.addEventListener('change', () => {
+    toggleCustomRange(discountSelect, discountCustom);
   });
+
+  stockSelect?.addEventListener('change', () => {
+    toggleCustomRange(stockSelect, stockCustom);
+  });
+
+  let allGroups = [];
+  try {
+    allGroups = JSON.parse(dataEl.textContent || '[]');
+  } catch (err) {
+    console.error('Failed to parse group data', err);
+    return;
+  }
+
+  const formatCurrency = (value) => {
+    if (value === null || value === undefined) return '';
+    return `$${Number(value).toFixed(2)}`;
+  };
+
+  const formatDiscount = (group) => {
+    if (group.min_pct_off === null || group.min_pct_off === undefined) return '';
+    const minPct = Math.floor(group.min_pct_off * 100);
+    if (group.max_pct_off !== null && group.max_pct_off !== undefined && group.max_pct_off !== group.min_pct_off) {
+      const maxPct = Math.floor(group.max_pct_off * 100);
+      return `${minPct}%–${maxPct}% off`;
+    }
+    return `${minPct}% off`;
+  };
+
+  const formatDate = (value, { showTime = true } = {}) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const opts = showTime
+      ? { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }
+      : { month: 'short', day: '2-digit' };
+    return date.toLocaleString(undefined, opts);
+  };
+
+  const formatRangeText = (minValue, maxValue, prefix) => {
+    if (minValue === null || minValue === undefined) return '';
+    const base = `${prefix} ${formatCurrency(minValue)}`;
+    if (maxValue !== null && maxValue !== undefined && maxValue !== minValue) {
+      return `${base} – ${formatCurrency(maxValue)}`;
+    }
+    return base;
+  };
+
+  const availabilityClass = (text) => {
+    if (!text) return '';
+    return `availability-${text.toLowerCase().replace(/\s+/g, '-')}`;
+  };
+
+  const buildStoreRows = (stores = [], defaultSku = '') => {
+    return stores
+      .map((store) => {
+        const availability = store.availability || 'Unknown';
+        const availabilityClassName = availabilityClass(availability);
+        const storeName = store.store_label || store.store_name || (store.store_zip ? `Lowe's ${store.store_zip}` : (store.store_id ? `Store ${store.store_id}` : 'Unknown store'));
+        const storeLink = store.store_product_url || store.product_url || '#';
+        const storeTip = store.store_tooltip || `${store.store_city || ''}, ${store.store_state || ''} ${store.store_zip || ''}`;
+        const savings = store.price_was !== null && store.price_was !== undefined && store.price !== null && store.price !== undefined
+          ? Math.max(store.price_was - store.price, 0)
+          : null;
+        const stockText = store.stock_estimate !== null && store.stock_estimate !== undefined
+          ? `Stock: ${store.stock_estimate}`
+          : (store.stock_label || '');
+        const storeNumber = store.store_id || store.store_number || '';
+        const sku = store.sku || defaultSku || '';
+        const canSave = Boolean(storeNumber && sku);
+        return `
+        <div class="store-row">
+          <div class="store-details">
+            <div class="store-name" title="${storeTip}">${storeName}</div>
+            <div class="store-location">
+              ${(store.store_state || '')} ${store.store_zip || ''}
+            </div>
+          </div>
+          <div class="store-pricing">
+            <div class="price">${store.price !== null && store.price !== undefined ? formatCurrency(store.price) : '<span class="muted">–</span>'}</div>
+            ${store.price_was ? `<div class="was-price">Was ${formatCurrency(store.price_was)}</div>` : ''}
+            ${savings ? `<div class="store-savings">Save ${formatCurrency(savings)}</div>` : ''}
+            ${store.prev_price ? `<div class="prev-price">Prev ${formatCurrency(store.prev_price)}</div>` : ''}
+          </div>
+          <div class="store-meta">
+            <span class="availability-badge ${availabilityClassName}">${availability}</span>
+            ${stockText ? `<span class="stock-pill">${stockText}</span>` : ''}
+            ${store.updated_at ? `<span class="timestamp">Updated ${formatDate(store.updated_at)}</span>` : ''}
+          </div>
+          <div class="store-action">
+            <a class="btn small" href="${storeLink}" target="_blank" rel="noopener">View Store Deal</a>
+            ${canSave ? `<button type="button" class="btn tertiary small js-save-deal" data-store="${storeNumber}" data-sku="${sku}">Save deal</button>` : ''}
+          </div>
+        </div>`;
+      })
+      .join('');
+  };
+
+  const buildCard = (group) => {
+    const keywords = [
+      group.title || '',
+      group.sku || '',
+      ...(group.stores || []).map((store) => `${store.store_name || ''} ${store.store_state || ''} ${store.store_zip || ''} ${store.store_id || ''}`),
+    ]
+      .join(' ')
+      .toLowerCase();
+    const discount = formatDiscount(group);
+    const priceCurrent = group.min_price !== null && group.min_price !== undefined
+      ? `${formatCurrency(group.min_price)}${group.max_price !== null && group.max_price !== undefined && group.max_price !== group.min_price ? ` – ${formatCurrency(group.max_price)}` : ''}`
+      : 'Price unavailable';
+    const regularPrice = group.min_price_was !== null && group.min_price_was !== undefined
+      ? formatRangeText(group.min_price_was, group.max_price_was, 'Regular')
+      : '';
+    const priceSpread = group.price_spread !== null && group.price_spread !== undefined && group.price_spread > 0
+      ? `Spread ${formatCurrency(group.price_spread)}`
+      : '';
+    const savingsText = group.min_savings !== null && group.min_savings !== undefined
+      ? `Save ${formatCurrency(group.min_savings)}${group.max_savings !== null && group.max_savings !== undefined && group.max_savings !== group.min_savings ? ` – ${formatCurrency(group.max_savings)}` : ''}`
+      : '';
+    const storeCountText = `${group.locations} store${group.locations === 1 ? '' : 's'} with this price`;
+    const addedAgo = Number.isFinite(group.days_since_added)
+      ? `${group.days_since_added}d ago`
+      : '';
+
+    const card = document.createElement('article');
+    card.className = 'product-card';
+    card.dataset.keywords = keywords;
+    card.innerHTML = `
+      <div class="product-card__header">
+        <div class="product-card__image">
+          ${
+            group.image_url
+              ? `<img src="${group.image_url}" alt="${group.title}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;">`
+              : '<div class="image-placeholder">No Image</div>'
+          }
+        </div>
+        <div class="product-card__body">
+          <h2 class="product-title">
+            ${
+              group.best_product_url
+                ? `<a href="${group.best_product_url}" target="_blank" rel="noopener">${group.title}</a>`
+                : group.title
+            }
+          </h2>
+          <div class="product-meta">
+            <span class="pill category">${group.category || 'Uncategorised'}</span>
+            <span class="pill sku">SKU ${group.sku}</span>
+            <span class="pill locations">${group.locations} store${group.locations === 1 ? '' : 's'}</span>
+          </div>
+          <div class="product-pricing">
+            <div class="price-current">${priceCurrent}</div>
+            ${regularPrice ? `<div class="price-was">${regularPrice}</div>` : ''}
+            ${priceSpread ? `<div class="price-spread">${priceSpread}</div>` : ''}
+            ${savingsText ? `<div class="price-savings">${savingsText}</div>` : ''}
+            ${discount ? `<span class="discount-badge">${discount}</span>` : ''}
+            <div class="store-count-note">${storeCountText}</div>
+          </div>
+          <div class="product-timeline">
+            ${group.added_at ? `<span>Added ${formatDate(group.added_at, { showTime: false })}${addedAgo ? ` (${addedAgo})` : ''}</span>` : ''}
+            ${group.last_seen ? `<span>Updated ${formatDate(group.last_seen)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="store-list">
+        ${buildStoreRows(group.stores, group.sku || '')}
+      </div>
+    `;
+    return card;
+  };
+
+  let filteredGroups = allGroups.slice();
+  let renderedCount = parseInt(grid.dataset.initialCount || '0', 10) || 0;
+
+  const renderBatch = (reset = false) => {
+    if (reset) {
+      grid.innerHTML = '';
+      renderedCount = 0;
+    }
+    if (renderedCount >= filteredGroups.length) {
+      if (filteredGroups.length === 0) {
+        noResultsMessage.hidden = false;
+      } else {
+        noResultsMessage.hidden = true;
+      }
+      return;
+    }
+    const slice = filteredGroups.slice(renderedCount, renderedCount + BATCH_SIZE);
+    slice.forEach((group) => grid.appendChild(buildCard(group)));
+    renderedCount += slice.length;
+
+    if (filteredGroups.length === 0) {
+      noResultsMessage.hidden = false;
+    } else {
+      noResultsMessage.hidden = true;
+    }
+  };
+
+  const handleSearch = () => {
+    const query = (searchInput?.value || '').trim().toLowerCase();
+    if (!query) {
+      filteredGroups = allGroups.slice();
+    } else {
+      filteredGroups = allGroups.filter((group) => {
+        const keywords = [
+          group.title || '',
+          group.sku || '',
+          ...(group.stores || []).map((store) => `${store.store_name || ''} ${store.store_state || ''} ${store.store_zip || ''}`),
+        ]
+          .join(' ')
+          .toLowerCase();
+        return keywords.includes(query);
+      });
+    }
+    renderBatch(true);
+  };
+
+  const saveDealRequest = async (storeNumber, sku) => {
+    const response = await fetch('/cheapskater/save-deal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store_number: storeNumber, sku }),
+    });
+    if (!response.ok) {
+      throw new Error(`Save failed with status ${response.status}`);
+    }
+    return response.json();
+  };
+
+  const handleSaveButton = async (button) => {
+    const storeNumber = button.dataset.store;
+    const sku = button.dataset.sku;
+    if (!storeNumber || !sku) {
+      return;
+    }
+    const originalText = button.textContent;
+    button.disabled = true;
+    try {
+      const payload = await saveDealRequest(storeNumber, sku);
+      if (!payload?.ok) {
+        throw new Error('Invalid save response');
+      }
+      button.textContent = 'Saved';
+      button.classList.add('saved');
+      button.setAttribute('aria-pressed', 'true');
+      showToast('Deal saved. Open Saved Deals to review your stops.');
+    } catch (error) {
+      console.error('Unable to save deal', error);
+      button.textContent = 'Retry';
+      setTimeout(() => {
+        button.textContent = originalText;
+      }, 1800);
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  grid.addEventListener('click', (event) => {
+    const saveButton = event.target.closest('.js-save-deal');
+    if (!saveButton) {
+      return;
+    }
+    event.preventDefault();
+    handleSaveButton(saveButton);
+  });
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const [entry] = entries;
+      if (entry.isIntersecting) {
+        renderBatch();
+      }
+    },
+    {
+      rootMargin: '200px',
+    }
+  );
+
+  if (sentinel) {
+    observer.observe(sentinel);
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      handleSearch();
+    });
+  }
+
+  if (renderedCount === 0) {
+    renderBatch(true);
+  }
 });
 </script>
 {% endblock %}

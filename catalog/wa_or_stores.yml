@@ -1,3 +1,198 @@
-﻿zips:
-- 98101
-- 97201
+zips:
+- '97060'
+- '97124'
+- '97128'
+- '97201'
+- '97222'
+- '97223'
+- '97301'
+- '97303'
+- '97321'
+- '97401'
+- '97470'
+- '97501'
+- '97701'
+- '97756'
+- '98001'
+- '98003'
+- '98012'
+- '98027'
+- '98030'
+- '98036'
+- '98055'
+- '98133'
+- '98144'
+- '98188'
+- '98201'
+- '98223'
+- '98225'
+- '98272'
+- '98273'
+- '98310'
+- '98315'
+- '98366'
+- '98373'
+- '98391'
+- '98401'
+- '98499'
+- '98501'
+- '98503'
+- '98632'
+- '98662'
+- '98683'
+- '98801'
+- '98837'
+- '98902'
+- '99206'
+- '99208'
+- '99216'
+- '99301'
+- '99336'
+stores:
+- zip: '97321'
+  store_name: Albany Lowe's
+  state: OR
+- zip: '97701'
+  store_name: Bend Lowe's
+  state: OR
+- zip: '97401'
+  store_name: Eugene Lowe's
+  state: OR
+- zip: '97124'
+  store_name: Hillsboro Lowe's
+  state: OR
+- zip: '97303'
+  store_name: Keizer Lowe's
+  state: OR
+- zip: '97128'
+  store_name: McMinnville Lowe's
+  state: OR
+- zip: '97501'
+  store_name: Medford Lowe's
+  state: OR
+- zip: '97222'
+  store_name: Milwaukie Lowe's
+  state: OR
+- zip: '97201'
+  store_name: Portland Lowe's
+  state: OR
+- zip: '97756'
+  store_name: Redmond Lowe's
+  state: OR
+- zip: '97470'
+  store_name: Roseburg Lowe's
+  state: OR
+- zip: '97301'
+  store_name: Salem Lowe's
+  state: OR
+- zip: '97223'
+  store_name: Tigard Lowe's
+  state: OR
+- zip: '97060'
+  store_name: Wood Village Lowe's
+  state: OR
+- zip: '98001'
+  store_name: Auburn Lowe's
+  state: WA
+- zip: '98225'
+  store_name: Bellingham Lowe's
+  state: WA
+- zip: '98391'
+  store_name: Bonney Lake Lowe's
+  state: WA
+- zip: '98310'
+  store_name: Bremerton Lowe's
+  state: WA
+- zip: '98662'
+  store_name: E. Vancouver Lowe's
+  state: WA
+- zip: '98201'
+  store_name: Everett Lowe's
+  state: WA
+- zip: '98003'
+  store_name: Federal Way Lowe's
+  state: WA
+- zip: '98027'
+  store_name: Issaquah Lowe's
+  state: WA
+- zip: '99336'
+  store_name: Kennewick Lowe's
+  state: WA
+- zip: '98030'
+  store_name: Kent Lowe's
+  state: WA
+- zip: '98683'
+  store_name: Lacamas Lake Lowe's
+  state: WA
+- zip: '98503'
+  store_name: Lacey Lowe's
+  state: WA
+- zip: '98499'
+  store_name: Lakewood Lowe's
+  state: WA
+- zip: '99206'
+  store_name: Liberty Lake Lowe's
+  state: WA
+- zip: '98632'
+  store_name: Longview Lowe's
+  state: WA
+- zip: '98036'
+  store_name: Lynnwood Lowe's
+  state: WA
+- zip: '98012'
+  store_name: Mill Creek Lowe's
+  state: WA
+- zip: '98272'
+  store_name: Monroe Lowe's
+  state: WA
+- zip: '98837'
+  store_name: Moses Lake Lowe's
+  state: WA
+- zip: '98273'
+  store_name: Mount Vernon Lowe's
+  state: WA
+- zip: '98133'
+  store_name: N. Seattle Lowe's
+  state: WA
+- zip: '98501'
+  store_name: Olympia Lowe's
+  state: WA
+- zip: '99301'
+  store_name: Pasco Lowe's
+  state: WA
+- zip: '98366'
+  store_name: Port Orchard Lowe's
+  state: WA
+- zip: '98373'
+  store_name: Puyallup Lowe's
+  state: WA
+- zip: '98144'
+  store_name: Rainier Lowe's
+  state: WA
+- zip: '98055'
+  store_name: Renton Lowe's
+  state: WA
+- zip: '98315'
+  store_name: Silverdale Lowe's
+  state: WA
+- zip: '98223'
+  store_name: Smokey Point Lowe's
+  state: WA
+- zip: '99208'
+  store_name: Spokane Lowe's
+  state: WA
+- zip: '99216'
+  store_name: Spokane Valley Lowe's
+  state: WA
+- zip: '98401'
+  store_name: Tacoma Lowe's
+  state: WA
+- zip: '98188'
+  store_name: Tukwila Lowe's
+  state: WA
+- zip: '98801'
+  store_name: Wenatchee Lowe's
+  state: WA
+- zip: '98902'
+  store_name: Yakima Lowe's
+  state: WA

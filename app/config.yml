@@ -1,9 +1,9 @@
 retailers:
   lowes:
     enabled: true
-    zips: ["98101","98115","98052","98402","99201","98661","97204","97223","97005","97301","97401","97702"]
+    zips: []
     catalog_path: "catalog/building_materials.lowes.yml"
-    # zips_path: "catalog/wa_or_stores.yml"  # not used when inline zips are set
+    zips_path: "catalog/wa_or_stores.yml"
 output:
   csv_path: "outputs/orwa_items.csv"
   sqlite_path: "orwa_lowes.sqlite"

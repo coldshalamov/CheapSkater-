@@ -106,3 +106,31 @@ class Quarantine(Base):
         Index("ix_quarantine_reason", "reason"),
         Index("ix_quarantine_zip", "zip"),
     )
+
+
+class StorePriceHistory(Base):
+    """Compressed per-store price history records."""
+
+    __tablename__ = "store_price_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    retailer: Mapped[str] = mapped_column(String, nullable=False)
+    store_id: Mapped[str] = mapped_column(String, nullable=False)
+    sku: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_was: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pct_off: Mapped[float | None] = mapped_column(Float, nullable=True)
+    availability: Mapped[str | None] = mapped_column(String, nullable=True)
+    product_url: Mapped[str] = mapped_column(String, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    clearance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    __table_args__ = (
+        Index("ix_history_store_sku", "store_id", "sku"),
+        Index("ix_history_store_updated", "store_id", "updated_at"),
+        Index("ix_history_sku", "sku"),
+    )

@@ -26,7 +26,7 @@ import uvicorn
 import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error as PlaywrightError
 
 from app.catalog.discover_lowes import (
     discover_categories,
@@ -39,6 +39,8 @@ from app.errors import PageLoadError, SelectorChangedError, StoreContextError
 from app.extractors import schemas
 from app.extractors.dom_utils import human_wait
 from app.logging_config import get_logger
+from app.health import HealthMonitor, HealthState
+from app.normalizers import normalize_availability
 from app.retailers.lowes import run_for_zip
 from app.storage import repo
 from app.storage.db import check_quarantine_table, get_engine, init_db_safe, make_session
@@ -114,6 +116,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "healthcheck_url": "",
     "max_concurrency": 3,
 }
+
+def _parse_threshold(env_suspect: str, env_block: str, default_suspect: int, default_block: int) -> tuple[int, int]:
+    suspect = max(1, int(os.getenv(env_suspect, str(default_suspect))))
+    block = int(os.getenv(env_block, str(default_block)))
+    if block <= suspect:
+        block = suspect + 1
+    return suspect, block
+
+
+BROWSER_RECOVERY_ATTEMPTS = max(0, int(os.getenv("BROWSER_RECOVERY_ATTEMPTS", "2")))
+BROWSER_RESTART_DELAY = float(os.getenv("BROWSER_RESTART_DELAY", "6"))
+HEALTH_LOG_FILE = Path(os.getenv("HEALTH_LOG_FILE", "logs/health.log"))
+ZERO_THRESHOLDS = _parse_threshold("HEALTH_ZERO_SUSPECT", "HEALTH_ZERO_BLOCK", 3, 6)
+HTTP_THRESHOLDS = _parse_threshold("HEALTH_HTTP_SUSPECT", "HEALTH_HTTP_BLOCK", 2, 4)
+DOM_THRESHOLDS = _parse_threshold("HEALTH_DOM_SUSPECT", "HEALTH_DOM_BLOCK", 2, 4)
 
 
 SELECTOR_VALIDATION_URL = "https://www.lowes.com/"
@@ -388,6 +405,22 @@ def generate_test_data(session_factory, *, item_count: int = 100) -> None:
                 clearance=True,
             )
             repo.insert_observation(session, observation)
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=store_id,
+                sku=sku,
+                title=title,
+                category=category,
+                ts_utc=observation.ts_utc,
+                price=price,
+                price_was=previous_price,
+                pct_off=pct_off,
+                availability="In Stock",
+                product_url=product_url,
+                image_url=f"https://example.com/images/{sku}.jpg",
+                clearance=True,
+            )
 
         session.commit()
         LOGGER.info("Generated %d synthetic items for testing", item_count)
@@ -628,6 +661,28 @@ def _load_zips_file(path: Path) -> list[str]:
     return zips
 
 
+def _load_store_directory(path: Path) -> dict[str, list[dict[str, str]]]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    entries = data.get("stores") or []
+    directory: dict[str, list[dict[str, str]]] = {}
+    for entry in entries:
+        zip_code = str(entry.get("zip") or "").strip()
+        store_id = str(entry.get("store_id") or "").strip()
+        store_name = (entry.get("store_name") or entry.get("name") or "").strip()
+        if not zip_code:
+            continue
+        payload: dict[str, str] = {}
+        if store_id:
+            payload["store_id"] = store_id
+        if store_name:
+            payload["store_name"] = store_name
+        directory.setdefault(zip_code, []).append(payload)
+    return directory
+
+
 def _filter_categories(
     categories: list[dict[str, str]], pattern: re.Pattern[str] | None
 ) -> list[dict[str, str]]:
@@ -657,6 +712,16 @@ def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]
     if not zips:
         raise RuntimeError("No ZIP codes configured. Provide zips or run discovery.")
     return zips
+
+
+def _resolve_store_hints(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    retailers = config.get("retailers", {})
+    lowes_conf = retailers.get("lowes", {})
+    zips_path = lowes_conf.get("zips_path")
+    if not zips_path:
+        return {}
+    path = _resolve_config_path(zips_path)
+    return _load_store_directory(path)
 
 
 def _get_pct_threshold(config: dict[str, Any]) -> float:
@@ -827,6 +892,7 @@ async def _run_cycle(
     dry_run = bool(getattr(args, "validate", False) or getattr(args, "probe", False))
 
     zips = _resolve_zips(args, config)
+    store_hints = _resolve_store_hints(args, config)
 
     if not zips:
         LOGGER.warning("No ZIP codes configured; skipping cycle")
@@ -893,6 +959,14 @@ async def _run_cycle(
     )
 
     any_zip_success = False
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    health_monitor = HealthMonitor(
+        run_id=run_id,
+        log_path=HEALTH_LOG_FILE,
+        zero_threshold=ZERO_THRESHOLDS,
+        http_threshold=HTTP_THRESHOLDS,
+        dom_threshold=DOM_THRESHOLDS,
+    )
 
     try:
         if args.probe:
@@ -928,6 +1002,7 @@ async def _run_cycle(
                             clearance_threshold=pct_threshold,
                             browser=browser,
                             shared_context=persistent_context,
+                            store_hints=store_hints,
                         )
                     except StoreContextError as exc:
                         LOGGER.error(
@@ -1064,18 +1139,61 @@ async def _run_cycle(
                 effective_concurrency = 1
             LOGGER.debug("Using concurrency=%s (max=%s)", effective_concurrency, configured_max)
             semaphore = asyncio.Semaphore(effective_concurrency)
+            browser_restart_lock = asyncio.Lock()
 
-            async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
-                async with semaphore:
+            async def _restart_browser(reason: str) -> None:
+                nonlocal browser, persistent_context
+                async with browser_restart_lock:
+                    LOGGER.warning("Restarting Playwright browser (%s)", reason)
+                    await close_browser(browser, persistent_context)
+                    health_monitor.record_browser_restart(reason=reason)
+                    browser, persistent_context = await launch_browser(playwright)
+
+            async def _scrape_zip_with_recovery(
+                zip_code: str,
+                *,
+                zip_extra: dict[str, Any],
+            ) -> list[dict[str, Any]]:
+                attempts = 0
+                while True:
                     try:
-                        zip_extra = {"zip": zip_code}
-                        rows = await run_for_zip(
+                        return await run_for_zip(
                             playwright,
                             zip_code,
                             categories_to_use,
                             clearance_threshold=pct_threshold,
                             browser=browser,
                             shared_context=persistent_context,
+                            store_hints=store_hints,
+                        )
+                    except PlaywrightError as exc:
+                        attempts += 1
+                        health_monitor.record_http_error(
+                            zip_code=zip_code,
+                            reason="playwright_error",
+                            details={"attempt": attempts, "message": str(exc)},
+                        )
+                        LOGGER.warning(
+                            "Playwright failure scraping zip %s attempt %s/%s: %s",
+                            zip_code,
+                            attempts,
+                            max(1, BROWSER_RECOVERY_ATTEMPTS),
+                            exc,
+                            extra=zip_extra,
+                        )
+                        if attempts > BROWSER_RECOVERY_ATTEMPTS:
+                            raise
+                        await _restart_browser("playwright_error")
+                        if BROWSER_RESTART_DELAY > 0:
+                            await asyncio.sleep(BROWSER_RESTART_DELAY)
+
+            async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
+                async with semaphore:
+                    try:
+                        zip_extra = {"zip": zip_code}
+                        rows = await _scrape_zip_with_recovery(
+                            zip_code,
+                            zip_extra=zip_extra,
                         )
                     except StoreContextError as exc:
                         LOGGER.error(
@@ -1083,6 +1201,11 @@ async def _run_cycle(
                             zip_code,
                             exc,
                             extra=zip_extra,
+                        )
+                        health_monitor.record_dom_error(
+                            zip_code=zip_code,
+                            reason="store_context_error",
+                            details={"message": str(exc)},
                         )
                         return 0, 0, False
                     except SelectorChangedError as exc:
@@ -1108,6 +1231,11 @@ async def _run_cycle(
                             error=exc,
                             dry_run=dry_run,
                         )
+                        health_monitor.record_dom_error(
+                            zip_code=zip_code,
+                            reason="selector_changed",
+                            details=extra,
+                        )
                         return 0, 0, False
                     except PageLoadError as exc:
                         extra = {
@@ -1123,6 +1251,11 @@ async def _run_cycle(
                             exc,
                             extra=extra,
                         )
+                        health_monitor.record_http_error(
+                            zip_code=zip_code,
+                            reason="page_load",
+                            details=extra,
+                        )
                         return 0, 0, False
                     except Exception as exc:  # pragma: no cover - defensive
                         LOGGER.exception(
@@ -1130,6 +1263,11 @@ async def _run_cycle(
                             zip_code,
                             exc,
                             extra=zip_extra,
+                        )
+                        health_monitor.record_http_error(
+                            zip_code=zip_code,
+                            reason="unexpected_error",
+                            details={"message": str(exc)},
                         )
                         return 0, 0, False
 
@@ -1140,7 +1278,38 @@ async def _run_cycle(
                                 zip_code,
                                 extra=zip_extra,
                             )
+                            health_monitor.record_zero_items(
+                                zip_code=zip_code,
+                                message="run_for_zip returned no rows",
+                            )
                             return 0, 0, True
+                        else:
+                            health_monitor.record_items(
+                                zip_code=zip_code,
+                                count=len(rows),
+                            )
+                            numeric_prices = [
+                                (row.get("price") or 0)
+                                for row in rows
+                                if isinstance(row.get("price"), (int, float))
+                            ]
+                            if not numeric_prices:
+                                health_monitor.record_data_anomaly(
+                                    zip_code=zip_code,
+                                    detail="all_prices_missing",
+                                    metrics={"rows": len(rows)},
+                                )
+                            distinct_skus = {
+                                (row.get("sku") or row.get("history_id"))
+                                for row in rows
+                                if row.get("sku") or row.get("history_id")
+                            }
+                            if len(distinct_skus) <= 1 and len(rows) >= 5:
+                                health_monitor.record_data_anomaly(
+                                    zip_code=zip_code,
+                                    detail="single_sku_multiple_rows",
+                                    metrics={"rows": len(rows)},
+                                )
 
                         items = 0
                         alerts = 0
@@ -1169,6 +1338,14 @@ async def _run_cycle(
                         return items, alerts, True
                     finally:
                         await _zip_pause()
+                        extra_delay = health_monitor.recommended_extra_delay()
+                        if extra_delay > 0:
+                            LOGGER.debug(
+                                "Health state %s -> sleeping extra %.1fs",
+                                health_monitor.state.value,
+                                extra_delay,
+                            )
+                            await asyncio.sleep(extra_delay)
 
             try:
                 results = await asyncio.gather(
@@ -1347,9 +1524,10 @@ async def _process_row(
             },
         )
         price_was = None
-    availability = (row.get("availability") or None)
+    availability = row.get("availability")
     if isinstance(availability, str):
-        availability = availability.strip() or None
+        availability = availability.strip()
+    availability = normalize_availability(availability)
 
     pct_off = row.get("pct_off")
     if isinstance(pct_off, str):
@@ -1423,6 +1601,22 @@ async def _process_row(
                 image_url=image_url,
             )
             repo.insert_observation(session, obs_model)
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=store_id,
+                sku=canonical_sku,
+                title=title,
+                category=category,
+                ts_utc=ts_now,
+                price=price,
+                price_was=price_was,
+                pct_off=pct_off,
+                availability=availability,
+                product_url=product_url,
+                image_url=image_url,
+                clearance=clearance_flag,
+            )
             session.commit()
 
         new_clearance = repo.should_alert_new_clearance(last_obs, obs_model)
@@ -1590,6 +1784,46 @@ def _ping_healthcheck(config: dict[str, Any]) -> None:
         )
 
 
+def _start_dashboard_background(host: str = "0.0.0.0", port: int = 8000) -> tuple[uvicorn.Server, threading.Thread]:
+    LOGGER.info("Starting dashboard thread | host=%s port=%s", host, port)
+    config = uvicorn.Config(
+        "app.dashboard:app",
+        host=host,
+        port=port,
+        reload=False,
+        log_config=None,
+    )
+    server = uvicorn.Server(config)
+
+    def run_dashboard() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(server.serve())
+        finally:
+            loop.close()
+
+    thread = threading.Thread(
+        target=run_dashboard,
+        name="dashboard-server",
+        daemon=True,
+    )
+    thread.start()
+    LOGGER.info("Dashboard thread launched (pid=%s)", os.getpid())
+    return server, thread
+
+
+def _stop_dashboard_background(
+    server: uvicorn.Server | None, thread: threading.Thread | None
+) -> tuple[uvicorn.Server | None, threading.Thread | None]:
+    if server is not None:
+        server.should_exit = True
+    if thread is not None:
+        thread.join(timeout=5)
+        LOGGER.info("Dashboard thread joined")
+    return None, None
+
+
 async def _async_main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
     if args.validate:
@@ -1671,16 +1905,39 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         LOGGER.info("Database initialized (existing tables preserved)")
     session_factory = make_session(engine)
 
+    if not args.validate:
+        session = None
+        try:
+            session = session_factory()
+            updates = repo.normalize_availability_records(session)
+            if updates:
+                session.commit()
+                LOGGER.info("Normalised legacy availability strings | rows=%d", updates)
+            else:
+                session.rollback()
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("Availability normalisation pass failed: %s", exc)
+        finally:
+            if session is not None:
+                session.close()
+
     if getattr(args, "generate_test_data", False):
         generate_test_data(session_factory)
         return
 
     notifier = Notifier()
 
+    dashboard_server: uvicorn.Server | None = None
+    dashboard_thread: threading.Thread | None = None
+    if args.dashboard:
+        dashboard_server, dashboard_thread = _start_dashboard_background()
+        print("Dashboard running at http://localhost:8000")
+
     try:
         await _run_cycle(args, config, categories, session_factory, notifier)
     except Exception:
         LOGGER.exception("Initial run cycle failed")
+        dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
         raise
 
     interval_minutes = config.get("schedule", {}).get("minutes", 180) or 180
@@ -1716,15 +1973,19 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         LOGGER.info("Validate mode: skipping quarantine cleanup")
 
     if args.once or args.probe:
+        if args.dashboard:
+            print("Scrape complete. Dashboard live at http://localhost:8000 — press Ctrl+C to exit.")
+            try:
+                await asyncio.Event().wait()
+            except (KeyboardInterrupt, SystemExit):
+                LOGGER.info("Shutdown signal received; exiting one-off dashboard session")
+        dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
         return
 
     if interval_minutes <= 0:
         interval_minutes = 180
 
     scheduler = AsyncIOScheduler()
-
-    dashboard_thread: threading.Thread | None = None
-    dashboard_server: uvicorn.Server | None = None
 
     async def scheduled_cycle() -> None:
         try:
@@ -1739,42 +2000,13 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     scheduler.start()
     LOGGER.info("Scheduler started with interval=%s minutes", interval_minutes)
 
-    if args.dashboard:
-        config = uvicorn.Config(
-            "app.dashboard:app",
-            host="0.0.0.0",
-            port=8000,
-            reload=False,
-            log_config=None,
-        )
-        dashboard_server = uvicorn.Server(config)
-
-        def run_dashboard() -> None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(dashboard_server.serve())
-            finally:
-                loop.close()
-
-        dashboard_thread = threading.Thread(
-            target=run_dashboard,
-            name="dashboard-server",
-            daemon=True,
-        )
-        dashboard_thread.start()
-        print("Dashboard running at http://localhost:8000")
-
     try:
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
         LOGGER.info("Shutdown signal received; stopping scheduler")
     finally:
         scheduler.shutdown(wait=False)
-        if dashboard_server is not None:
-            dashboard_server.should_exit = True
-        if dashboard_thread is not None:
-            dashboard_thread.join(timeout=5)
+        dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
 
 
 def main() -> None:
