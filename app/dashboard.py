@@ -34,6 +34,9 @@ BASE_PATH = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_PATH / "templates"
 STATIC_DIR = BASE_PATH / "static"
 DATABASE_FILE = Path(__file__).resolve().parent.parent / "orwa_lowes.sqlite"
+METRICS_SUMMARY_FILE = Path(os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json"))
+ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
+HEALTH_MAX_STALE_MINUTES = float(os.getenv("DASHBOARD_HEALTH_MAX_STALE_MINUTES", "120"))
 
 DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
 engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
@@ -50,6 +53,15 @@ if STATIC_DIR.exists():
 
 _STATS_CACHE: dict[str, Any] | None = None
 _STATS_CACHE_TS: float | None = None
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: HTTPException) -> PlainTextResponse:
@@ -1081,10 +1093,34 @@ def _render_dashboard(
 
 
 @app.get("/healthz")
-def healthcheck() -> dict[str, str]:
-    """Return application health information."""
+def healthcheck() -> dict[str, Any]:
+    """Return health along with the age of the latest ZIP heartbeat."""
 
-    return {"status": "ok"}
+    payload = _read_json(ZIP_CURSOR_FILE)
+    ts_text = payload.get("timestamp") if isinstance(payload, dict) else None
+    if not ts_text:
+        raise HTTPException(status_code=503, detail="zip cursor missing")
+    try:
+        stamp = datetime.fromisoformat(ts_text)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"cursor parse error: {exc}") from exc
+    age_minutes = (datetime.now(timezone.utc) - stamp).total_seconds() / 60.0
+    if HEALTH_MAX_STALE_MINUTES > 0 and age_minutes > HEALTH_MAX_STALE_MINUTES:
+        raise HTTPException(
+            status_code=503,
+            detail=f"stale cursor ({age_minutes:.1f}m > {HEALTH_MAX_STALE_MINUTES}m)",
+        )
+    return {"status": "ok", "age_minutes": age_minutes}
+
+
+@app.get("/metrics")
+def metrics() -> dict[str, Any]:
+    """Return the latest aggregated metrics snapshot."""
+
+    payload = _read_json(METRICS_SUMMARY_FILE)
+    if not payload:
+        raise HTTPException(status_code=404, detail="metrics summary unavailable")
+    return payload
 
 
 @app.get("/")

@@ -45,7 +45,6 @@ REM --- Disable selector preflight sanity-check ---
 set "CHEAPSKATER_SKIP_PREFLIGHT=1"
 set "CHEAPSKATER_HEADLESS=0"
 set "CHEAPSKATER_STEALTH=1"
-set "CHEAPSKATER_USER_DATA_DIR=%CD%\.playwright-profile"
 set "CHEAPSKATER_WAIT_MULTIPLIER=0.85"
 set "CHEAPSKATER_CATEGORY_DELAY_MIN_MS=900"
 set "CHEAPSKATER_CATEGORY_DELAY_MAX_MS=1900"
@@ -69,7 +68,7 @@ timeout /t 3 >nul
 start "" "http://localhost:8000" >nul 2>&1
 
 echo Running probe %EXTRA_ARGS%...
-python -m app.main --probe %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
+python -m app.main --probe --probe-cache-minutes 60 %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo Probe failed! Check %LOG_FILE%
     pause

@@ -7,6 +7,7 @@ LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/launcher.log"
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"
+PROBE_CACHE_MINUTES="${PROBE_CACHE_MINUTES:-60}"
 
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
@@ -89,7 +90,7 @@ fi
 
 PROBE_FILE=$(mktemp)
 log "Running probe check"
-if python -m app.main --probe >"${PROBE_FILE}"; then
+if python -m app.main --probe --probe-cache-minutes "${PROBE_CACHE_MINUTES}" >"${PROBE_FILE}"; then
     if ! python - <<'PY'
 import json
 import pathlib

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -53,6 +53,13 @@ from app.playwright_env import (
     selector_validation_skipped,
     zip_delay_bounds,
 )
+from app.monitoring import (
+    DataConsistencyTracker,
+    MemoryWatchdog,
+    MetricsEmitter,
+    ZipProgressTracker,
+)
+from app.snapshots import load_snapshot, store_snapshot
 
 
 LOGGER = get_logger(__name__)
@@ -131,6 +138,19 @@ HEALTH_LOG_FILE = Path(os.getenv("HEALTH_LOG_FILE", "logs/health.log"))
 ZERO_THRESHOLDS = _parse_threshold("HEALTH_ZERO_SUSPECT", "HEALTH_ZERO_BLOCK", 3, 6)
 HTTP_THRESHOLDS = _parse_threshold("HEALTH_HTTP_SUSPECT", "HEALTH_HTTP_BLOCK", 2, 4)
 DOM_THRESHOLDS = _parse_threshold("HEALTH_DOM_SUSPECT", "HEALTH_DOM_BLOCK", 2, 4)
+ZIP_HISTORY_FILE = Path(os.getenv("CHEAPSKATER_ZIP_HISTORY", "logs/zip_history.json"))
+ZIP_WATCHDOG_MINUTES = float(os.getenv("CHEAPSKATER_ZIP_WATCHDOG_MINUTES", "90"))
+METRICS_LOG_FILE = Path(os.getenv("CHEAPSKATER_METRICS_LOG", "logs/metrics.jsonl"))
+METRICS_SUMMARY_FILE = Path(os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json"))
+PROBE_STATE_FILE = Path(os.getenv("CHEAPSKATER_PROBE_STATE", "logs/probe_state.json"))
+SNAPSHOT_DIR = Path(os.getenv("CHEAPSKATER_SNAPSHOT_DIR", "logs/zip_snapshots"))
+SNAPSHOT_TTL_MINUTES = float(os.getenv("CHEAPSKATER_SNAPSHOT_TTL_MINUTES", "240"))
+DATA_TRACKER_FILE = Path(os.getenv("CHEAPSKATER_DATA_TRACKER", "logs/zip_rows.json"))
+DATA_ZERO_THRESHOLD = max(1, int(os.getenv("CHEAPSKATER_DATA_ZERO_THRESHOLD", "3")))
+DATA_HISTORY_LENGTH = max(3, int(os.getenv("CHEAPSKATER_DATA_HISTORY_LENGTH", "10")))
+MEMORY_LIMIT_MB = float(os.getenv("CHEAPSKATER_MEMORY_LIMIT_MB", "0"))
+MEMORY_WATCH_INTERVAL = float(os.getenv("CHEAPSKATER_MEMORY_CHECK_SECONDS", "20"))
+STORE_CONTEXT_MAX_RETRIES = max(1, int(os.getenv("CHEAPSKATER_STORE_CONTEXT_MAX_RETRIES", "3")))
 
 
 SELECTOR_VALIDATION_URL = "https://www.lowes.com/"
@@ -499,6 +519,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Quick sanity check: scrape one category at one ZIP and exit.",
     )
     parser.add_argument(
+        "--probe-cache-minutes",
+        type=float,
+        default=0.0,
+        help="Skip the probe when the last success is within this many minutes.",
+    )
+    parser.add_argument(
         "--discover-categories",
         action="store_true",
         help="Run catalog discovery for Lowe's and write catalog/all.lowes.yml.",
@@ -734,18 +760,49 @@ def _load_zip_resume(zips: list[str]) -> tuple[list[str], str | None]:
     return rotated, last_zip
 
 
-def _persist_zip_cursor(zip_code: str) -> None:
-    if not ZIP_RESUME_ENABLED:
-        return
+def _persist_zip_cursor(zip_code: str) -> datetime:
+    timestamp = datetime.now(timezone.utc)
     try:
         ZIP_CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "last_zip": zip_code,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp.isoformat(),
         }
         ZIP_CURSOR_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("Unable to write zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+    return timestamp
+
+
+def _record_probe_success() -> None:
+    try:
+        PROBE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PROBE_STATE_FILE.write_text(
+            json.dumps({"ts": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to record probe success: %s", exc)
+
+
+def _probe_recent(ttl_minutes: float) -> bool:
+    if ttl_minutes <= 0:
+        return False
+    try:
+        payload = json.loads(PROBE_STATE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+    ts_text = payload.get("ts")
+    if not ts_text:
+        return False
+    try:
+        stamp = datetime.fromisoformat(ts_text)
+    except Exception:
+        return False
+    return (datetime.now(timezone.utc) - stamp) <= timedelta(minutes=ttl_minutes)
+
 
 def _resolve_store_hints(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     retailers = config.get("retailers", {})
@@ -915,6 +972,9 @@ async def _run_cycle(
     categories: list[dict[str, str]],
     session_factory,
     notifier: Notifier,
+    zip_tracker: ZipProgressTracker,
+    metrics: MetricsEmitter,
+    data_tracker: DataConsistencyTracker,
 ) -> tuple[int, int]:
     await preflight_check(config)
 
@@ -925,6 +985,7 @@ async def _run_cycle(
     dry_run = bool(getattr(args, "validate", False) or getattr(args, "probe", False))
 
     zips = _resolve_zips(args, config)
+    zips = zip_tracker.interleave(zips, _infer_state_from_zip)
     resume_enabled = (
         ZIP_RESUME_ENABLED
         and not dry_run
@@ -1012,9 +1073,37 @@ async def _run_cycle(
         http_threshold=HTTP_THRESHOLDS,
         dom_threshold=DOM_THRESHOLDS,
     )
+    triggered, age_minutes = zip_tracker.watchdog_triggered()
+    if triggered:
+        if age_minutes == float("inf"):
+            LOGGER.warning(
+                "ZIP watchdog triggered: no successful ZIP recorded; ensure scraper is running regularly."
+            )
+        else:
+            LOGGER.warning(
+                "ZIP watchdog triggered | last_success_age=%.1f minutes threshold=%.1f",
+                age_minutes,
+                ZIP_WATCHDOG_MINUTES,
+            )
+
+    memory_watchdog = MemoryWatchdog(MEMORY_LIMIT_MB, MEMORY_WATCH_INTERVAL, LOGGER)
+    memory_watchdog.start()
 
     try:
         if args.probe:
+            cache_minutes = float(getattr(args, "probe_cache_minutes", 0.0) or 0.0)
+            if cache_minutes > 0 and _probe_recent(cache_minutes):
+                LOGGER.info(
+                    "Skipping probe: last successful probe within %.1f minutes",
+                    cache_minutes,
+                )
+                print(
+                    json.dumps(
+                        {"status": "ok", "reason": "probe_cached"},
+                        ensure_ascii=False,
+                    )
+                )
+                return 0, 0
             validation = await validate_selectors()
             card_count = validation["counts"].get("CARD", 0)
             if validation["errors"]:
@@ -1159,6 +1248,7 @@ async def _run_cycle(
                             ensure_ascii=False,
                         )
                     )
+                    _record_probe_success()
                     return processed_items, processed_alerts
                 finally:
                     await close_browser(browser, persistent_context)
@@ -1185,6 +1275,17 @@ async def _run_cycle(
             LOGGER.debug("Using concurrency=%s (max=%s)", effective_concurrency, configured_max)
             semaphore = asyncio.Semaphore(effective_concurrency)
             browser_restart_lock = asyncio.Lock()
+            store_context_failures: defaultdict[str, int] = defaultdict(int)
+            store_context_retry_candidates: set[str] = set()
+            store_context_skipped: set[str] = set()
+            store_context_lock = asyncio.Lock()
+
+            async def _schedule_store_retry(zip_code: str, *, skip: bool) -> None:
+                async with store_context_lock:
+                    if skip:
+                        store_context_skipped.add(zip_code)
+                    else:
+                        store_context_retry_candidates.add(zip_code)
 
             async def _restart_browser(reason: str) -> None:
                 nonlocal browser, persistent_context
@@ -1232,10 +1333,84 @@ async def _run_cycle(
                         if BROWSER_RESTART_DELAY > 0:
                             await asyncio.sleep(BROWSER_RESTART_DELAY)
 
-            async def _process_zip(zip_code: str) -> tuple[int, int, bool]:
+            async def _consume_rows(
+                rows: list[dict[str, Any]],
+                zip_code: str,
+                *,
+                snapshot_used: bool = False,
+            ) -> tuple[int, int, int]:
+                row_count = len(rows)
+                if row_count == 0:
+                    health_monitor.record_zero_items(
+                        zip_code=zip_code,
+                        message="run_for_zip returned no rows",
+                    )
+                    return 0, 0, 0
+
+                health_monitor.record_items(
+                    zip_code=zip_code,
+                    count=row_count,
+                )
+                numeric_prices = [
+                    (row.get("price") or 0)
+                    for row in rows
+                    if isinstance(row.get("price"), (int, float))
+                ]
+                if not numeric_prices:
+                    health_monitor.record_data_anomaly(
+                        zip_code=zip_code,
+                        detail="all_prices_missing",
+                        metrics={"rows": row_count},
+                    )
+                distinct_skus = {
+                    (row.get("sku") or row.get("history_id"))
+                    for row in rows
+                    if row.get("sku") or row.get("history_id")
+                }
+                if len(distinct_skus) <= 1 and row_count >= 5:
+                    health_monitor.record_data_anomaly(
+                        zip_code=zip_code,
+                        detail="single_sku_multiple_rows",
+                        metrics={"rows": row_count},
+                    )
+                if snapshot_used:
+                    LOGGER.info(
+                        "Using cached snapshot for zip=%s | rows=%d",
+                        zip_code,
+                        row_count,
+                    )
+
+                items = 0
+                alerts = 0
+                seen_keys: set[tuple[str, str | None]] = set()
+                for row in rows:
+                    stats.processed += 1
+                    canonical, _ = _extract_identifiers(row)
+                    key = (zip_code, canonical)
+                    if canonical and key in seen_keys:
+                        stats.duplicates += 1
+                        continue
+                    if canonical:
+                        seen_keys.add(key)
+                    processed = await _process_row(
+                        row,
+                        zip_code,
+                        session_factory,
+                        notifier,
+                        pct_threshold,
+                        abs_map,
+                        stats=stats,
+                        dry_run=dry_run,
+                    )
+                    items += processed[0]
+                    alerts += processed[1]
+                return items, alerts, row_count
+
+            async def _process_zip(zip_code: str) -> tuple[int, int, bool, int]:
                 async with semaphore:
                     try:
                         zip_extra = {"zip": zip_code}
+                        metrics.emit("zip_started", zip=zip_code, run_id=run_id)
                         rows = await _scrape_zip_with_recovery(
                             zip_code,
                             zip_extra=zip_extra,
@@ -1252,7 +1427,30 @@ async def _run_cycle(
                             reason="store_context_error",
                             details={"message": str(exc)},
                         )
-                        return 0, 0, False
+                        metrics.emit(
+                            "zip_error",
+                            zip=zip_code,
+                            reason="store_context",
+                            run_id=run_id,
+                        )
+                        count = store_context_failures[zip_code] + 1
+                        store_context_failures[zip_code] = count
+                        if count < STORE_CONTEXT_MAX_RETRIES:
+                            LOGGER.info(
+                                "Queueing ZIP %s for retry (%s/%s)",
+                                zip_code,
+                                count,
+                                STORE_CONTEXT_MAX_RETRIES,
+                            )
+                            await _schedule_store_retry(zip_code, skip=False)
+                        else:
+                            LOGGER.error(
+                                "Skipping ZIP %s after %s store-context failures",
+                                zip_code,
+                                count,
+                            )
+                            await _schedule_store_retry(zip_code, skip=True)
+                        return 0, 0, False, 0
                     except SelectorChangedError as exc:
                         extra = {
                             "zip": zip_code,
@@ -1276,12 +1474,36 @@ async def _run_cycle(
                             error=exc,
                             dry_run=dry_run,
                         )
+                        cached_rows = load_snapshot(SNAPSHOT_DIR, zip_code, SNAPSHOT_TTL_MINUTES)
+                        if cached_rows:
+                            metrics.emit(
+                                "zip_snapshot_used",
+                                zip=zip_code,
+                                rows=len(cached_rows),
+                                run_id=run_id,
+                            )
+                            items, alerts, row_count = await _consume_rows(
+                                cached_rows, zip_code, snapshot_used=True
+                            )
+                            metrics.emit(
+                                "zip_finished",
+                                zip=zip_code,
+                                rows=row_count,
+                                run_id=run_id,
+                            )
+                            return items, alerts, True, row_count
                         health_monitor.record_dom_error(
                             zip_code=zip_code,
                             reason="selector_changed",
                             details=extra,
                         )
-                        return 0, 0, False
+                        metrics.emit(
+                            "zip_error",
+                            zip=zip_code,
+                            reason="selector_changed",
+                            run_id=run_id,
+                        )
+                        return 0, 0, False, 0
                     except PageLoadError as exc:
                         extra = {
                             "zip": zip_code,
@@ -1301,7 +1523,13 @@ async def _run_cycle(
                             reason="page_load",
                             details=extra,
                         )
-                        return 0, 0, False
+                        metrics.emit(
+                            "zip_error",
+                            zip=zip_code,
+                            reason="page_load",
+                            run_id=run_id,
+                        )
+                        return 0, 0, False, 0
                     except Exception as exc:  # pragma: no cover - defensive
                         LOGGER.exception(
                             "Unexpected failure scraping ZIP %s: %s",
@@ -1314,7 +1542,13 @@ async def _run_cycle(
                             reason="unexpected_error",
                             details={"message": str(exc)},
                         )
-                        return 0, 0, False
+                        metrics.emit(
+                            "zip_error",
+                            zip=zip_code,
+                            reason="unexpected_error",
+                            run_id=run_id,
+                        )
+                        return 0, 0, False, 0
 
                     else:
                         if not rows:
@@ -1323,64 +1557,24 @@ async def _run_cycle(
                                 zip_code,
                                 extra=zip_extra,
                             )
-                            health_monitor.record_zero_items(
-                                zip_code=zip_code,
-                                message="run_for_zip returned no rows",
+                            metrics.emit(
+                                "zip_finished",
+                                zip=zip_code,
+                                rows=0,
+                                run_id=run_id,
                             )
-                            return 0, 0, True
-                        else:
-                            health_monitor.record_items(
-                                zip_code=zip_code,
-                                count=len(rows),
-                            )
-                            numeric_prices = [
-                                (row.get("price") or 0)
-                                for row in rows
-                                if isinstance(row.get("price"), (int, float))
-                            ]
-                            if not numeric_prices:
-                                health_monitor.record_data_anomaly(
-                                    zip_code=zip_code,
-                                    detail="all_prices_missing",
-                                    metrics={"rows": len(rows)},
-                                )
-                            distinct_skus = {
-                                (row.get("sku") or row.get("history_id"))
-                                for row in rows
-                                if row.get("sku") or row.get("history_id")
-                            }
-                            if len(distinct_skus) <= 1 and len(rows) >= 5:
-                                health_monitor.record_data_anomaly(
-                                    zip_code=zip_code,
-                                    detail="single_sku_multiple_rows",
-                                    metrics={"rows": len(rows)},
-                                )
+                            return 0, 0, True, 0
 
-                        items = 0
-                        alerts = 0
-                        seen_keys: set[tuple[str, str | None]] = set()
-                        for row in rows:
-                            stats.processed += 1
-                            canonical, _ = _extract_identifiers(row)
-                            key = (zip_code, canonical)
-                            if canonical and key in seen_keys:
-                                stats.duplicates += 1
-                                continue
-                            if canonical:
-                                seen_keys.add(key)
-                            processed = await _process_row(
-                                row,
-                                zip_code,
-                                session_factory,
-                                notifier,
-                                pct_threshold,
-                                abs_map,
-                                stats=stats,
-                                dry_run=dry_run,
-                            )
-                            items += processed[0]
-                            alerts += processed[1]
-                        return items, alerts, True
+                        items, alerts, row_count = await _consume_rows(rows, zip_code)
+                        metrics.emit(
+                            "zip_finished",
+                            zip=zip_code,
+                            rows=row_count,
+                            run_id=run_id,
+                        )
+                        if not dry_run:
+                            store_snapshot(SNAPSHOT_DIR, zip_code, rows)
+                        return items, alerts, True, row_count
                     finally:
                         await _zip_pause()
                         extra_delay = health_monitor.recommended_extra_delay()
@@ -1396,7 +1590,7 @@ async def _run_cycle(
             restart_counter_lock = asyncio.Lock()
             zips_since_restart = 0
 
-            async def _process_zip_with_cursor(zip_code: str) -> tuple[int, int, bool]:
+            async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
                 nonlocal zips_since_restart
                 try:
                     result = await asyncio.wait_for(
@@ -1410,10 +1604,18 @@ async def _run_cycle(
                         ZIP_PROGRESS_TIMEOUT_MINUTES,
                     )
                     await _restart_browser("zip_timeout")
-                    result = (0, 0, False)
-                if resume_enabled:
+                    metrics.emit(
+                        "zip_error",
+                        zip=zip_code,
+                        reason="zip_timeout",
+                        run_id=run_id,
+                    )
+                    result = (0, 0, False, 0)
+                items, alerts, success, row_count = result
+                if success:
                     async with zip_cursor_lock:
-                        _persist_zip_cursor(zip_code)
+                        cursor_timestamp = _persist_zip_cursor(zip_code)
+                    zip_tracker.record_success(zip_code, cursor_timestamp)
                 if browser_restart_interval:
                     async with restart_counter_lock:
                         nonlocal zips_since_restart
@@ -1425,19 +1627,34 @@ async def _run_cycle(
                             )
                             await _restart_browser("zip_interval")
                             zips_since_restart = 0
-                return result
+                return zip_code, items, alerts, success, row_count
 
             try:
-                results = await asyncio.gather(
-                    *(_process_zip_with_cursor(zip_code) for zip_code in zips)
-                )
-                for items, alerts, success in results:
-                    total_items += items
-                    total_alerts += alerts
-                    any_zip_success = any_zip_success or success
+                pending_batch = list(zips)
+                while pending_batch:
+                    results = await asyncio.gather(
+                        *(_process_zip_with_cursor(zip_code) for zip_code in pending_batch)
+                    )
+                    for result in results:
+                        zip_code, items, alerts, success, row_count = result
+                        total_items += items
+                        total_alerts += alerts
+                        any_zip_success = any_zip_success or success
+                        if not dry_run:
+                            data_tracker.record(zip_code, row_count)
+                    async with store_context_lock:
+                        pending_batch = list(store_context_retry_candidates)
+                        store_context_retry_candidates.clear()
+                if store_context_skipped:
+                    LOGGER.warning(
+                        "Skipped %d ZIPs after repeated store-context failures: %s",
+                        len(store_context_skipped),
+                        ", ".join(sorted(store_context_skipped)),
+                    )
             finally:
                 await close_browser(browser, persistent_context)
     finally:
+        memory_watchdog.stop()
         duration = time.monotonic() - start
 
     LOGGER.info(
@@ -1447,6 +1664,14 @@ async def _run_cycle(
         stats.quarantined,
         stats.duplicates,
     )
+    data_tracker.save()
+    zero_anomalies = data_tracker.detect_zero_streaks()
+    for anomaly in zero_anomalies:
+        LOGGER.warning(
+            "ZIP %s produced zero rows for %s consecutive runs",
+            anomaly["zip"],
+            anomaly["zero_streak"],
+        )
     if stats.quarantined:
         summary = _format_quarantine_summary(stats.reasons, stats.quarantined)
         LOGGER.info(summary)
@@ -1977,7 +2202,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     if not categories:
         raise RuntimeError("No categories matched the provided filter.")
 
-    engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
+        engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
     if args.validate:
         LOGGER.info("Validate mode: skipping database schema initialisation")
     else:
@@ -2006,6 +2231,17 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         return
 
     notifier = Notifier()
+    zip_tracker = ZipProgressTracker(ZIP_CURSOR_FILE, ZIP_HISTORY_FILE, ZIP_WATCHDOG_MINUTES)
+    metrics = MetricsEmitter(
+        METRICS_LOG_FILE,
+        METRICS_SUMMARY_FILE,
+        enabled=not (getattr(args, "validate", False) or getattr(args, "probe", False)),
+    )
+    data_tracker = DataConsistencyTracker(
+        DATA_TRACKER_FILE,
+        history_length=DATA_HISTORY_LENGTH,
+        zero_threshold=DATA_ZERO_THRESHOLD,
+    )
 
     dashboard_server: uvicorn.Server | None = None
     dashboard_thread: threading.Thread | None = None
@@ -2014,7 +2250,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         print("Dashboard running at http://localhost:8000")
 
     try:
-        await _run_cycle(args, config, categories, session_factory, notifier)
+        await _run_cycle(args, config, categories, session_factory, notifier, zip_tracker, metrics, data_tracker)
     except Exception:
         LOGGER.exception("Initial run cycle failed")
         dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
@@ -2069,7 +2305,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
 
     async def scheduled_cycle() -> None:
         try:
-            await _run_cycle(args, config, categories, session_factory, notifier)
+            await _run_cycle(args, config, categories, session_factory, notifier, zip_tracker, metrics, data_tracker)
         except PreflightError as exc:
             LOGGER.exception("Scheduled preflight check failed")
             raise
