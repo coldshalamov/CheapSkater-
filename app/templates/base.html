@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}CheapSkater Dashboard{% endblock %}</title>
+    <title>{% block title %}GloorBot Dashboard{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     {% block extra_head %}{% endblock %}
 </head>
@@ -11,8 +11,11 @@
     <header class="site-header">
         <div class="brand">
             <a href="/" class="brand-link">
-                <span class="brand-name">CheapSkater</span>
-                <span class="brand-tagline">WA &amp; OR Lowe's Clearance</span>
+                <img src="{{ url_for('static', path='img/gloorbot.png') }}" alt="GloorBot logo" class="brand-logo" loading="lazy">
+                <div class="brand-text">
+                    <span class="brand-name">GloorBot</span>
+                    <span class="brand-tagline">WA &amp; OR Lowe's Clearance</span>
+                </div>
             </a>
         </div>
         <nav class="nav-links" aria-label="Primary navigation">

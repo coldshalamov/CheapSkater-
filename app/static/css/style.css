@@ -328,10 +328,25 @@ a:focus {
 }
 
 .brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.85rem;
+    color: inherit;
+}
+
+.brand-logo {
+    width: 90px;
+    height: 90px;
+    object-fit: cover;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.brand-text {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    color: inherit;
 }
 
 .brand-name {

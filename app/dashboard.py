@@ -481,8 +481,14 @@ def _format_timestamp(value: Any, *, show_time: bool = True) -> str | None:
             return text
     if not isinstance(value, datetime):
         return str(value)
+    target = value.astimezone(timezone.utc)
+    dst = target.dst()
+    pacific_offset_hours = -7 if (dst and dst.total_seconds() != 0) else -8
+    pacific = target.astimezone(
+        timezone(timedelta(hours=pacific_offset_hours), name="PT")
+    )
     fmt = "%b %d %I:%M %p" if show_time else "%b %d"
-    return value.strftime(fmt)
+    return pacific.strftime(fmt) + " PT"
 
 
 def _format_currency(value: float | None) -> str | None:

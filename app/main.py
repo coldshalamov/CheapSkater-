@@ -714,6 +714,39 @@ def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]
     return zips
 
 
+def _load_zip_resume(zips: list[str]) -> tuple[list[str], str | None]:
+    if not ZIP_RESUME_ENABLED:
+        return zips, None
+    try:
+        data = json.loads(ZIP_CURSOR_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return zips, None
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to read zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+        return zips, None
+    last_zip = data.get("last_zip")
+    if not last_zip or last_zip not in zips:
+        return zips, None
+    idx = zips.index(last_zip)
+    if idx == len(zips) - 1:
+        return zips, last_zip
+    rotated = zips[idx + 1 :] + zips[: idx + 1]
+    return rotated, last_zip
+
+
+def _persist_zip_cursor(zip_code: str) -> None:
+    if not ZIP_RESUME_ENABLED:
+        return
+    try:
+        ZIP_CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "last_zip": zip_code,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        ZIP_CURSOR_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to write zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+
 def _resolve_store_hints(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     retailers = config.get("retailers", {})
     lowes_conf = retailers.get("lowes", {})
@@ -892,6 +925,18 @@ async def _run_cycle(
     dry_run = bool(getattr(args, "validate", False) or getattr(args, "probe", False))
 
     zips = _resolve_zips(args, config)
+    resume_enabled = (
+        ZIP_RESUME_ENABLED
+        and not dry_run
+        and not args.probe
+        and not getattr(args, "zips", None)
+    )
+    zip_timeout_seconds = max(60.0, ZIP_PROGRESS_TIMEOUT_MINUTES * 60.0)
+    browser_restart_interval = 0 if args.probe else BROWSER_ZIP_RESTART_LIMIT
+    if resume_enabled:
+        zips, resume_marker = _load_zip_resume(zips)
+        if resume_marker:
+            LOGGER.info("Resuming ZIP queue after %s", resume_marker)
     store_hints = _resolve_store_hints(args, config)
 
     if not zips:
@@ -1347,9 +1392,44 @@ async def _run_cycle(
                             )
                             await asyncio.sleep(extra_delay)
 
+            zip_cursor_lock = asyncio.Lock()
+            restart_counter_lock = asyncio.Lock()
+            zips_since_restart = 0
+
+            async def _process_zip_with_cursor(zip_code: str) -> tuple[int, int, bool]:
+                nonlocal zips_since_restart
+                try:
+                    result = await asyncio.wait_for(
+                        _process_zip(zip_code),
+                        timeout=zip_timeout_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    LOGGER.error(
+                        "ZIP %s timed out after %.1f minutes; restarting browser",
+                        zip_code,
+                        ZIP_PROGRESS_TIMEOUT_MINUTES,
+                    )
+                    await _restart_browser("zip_timeout")
+                    result = (0, 0, False)
+                if resume_enabled:
+                    async with zip_cursor_lock:
+                        _persist_zip_cursor(zip_code)
+                if browser_restart_interval:
+                    async with restart_counter_lock:
+                        nonlocal zips_since_restart
+                        zips_since_restart += 1
+                        if zips_since_restart >= browser_restart_interval:
+                            LOGGER.info(
+                                "Restarting browser after %s ZIPs to avoid resource exhaustion",
+                                browser_restart_interval,
+                            )
+                            await _restart_browser("zip_interval")
+                            zips_since_restart = 0
+                return result
+
             try:
                 results = await asyncio.gather(
-                    *(_process_zip(zip_code) for zip_code in zips)
+                    *(_process_zip_with_cursor(zip_code) for zip_code in zips)
                 )
                 for items, alerts, success in results:
                     total_items += items
@@ -2021,3 +2101,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
+ZIP_RESUME_ENABLED = os.getenv("CHEAPSKATER_RESUME_ZIPS", "1") not in {"0", "false", "False"}
+ZIP_PROGRESS_TIMEOUT_MINUTES = float(os.getenv("CHEAPSKATER_ZIP_TIMEOUT_MINUTES", "45"))
+BROWSER_ZIP_RESTART_LIMIT = max(0, int(os.getenv("CHEAPSKATER_BROWSER_ZIP_LIMIT", "10")))
