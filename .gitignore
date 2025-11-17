@@ -6,7 +6,8 @@
 __pycache__/
 
 # Local databases
-*.sqlite
+# (track SQLite so Render gets the populated dashboard data)
+#*.sqlite
 *.db
 
 # Application output directories
