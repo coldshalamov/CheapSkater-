@@ -453,11 +453,15 @@ a:focus {
 .image-placeholder {
     width: 70px;
     height: 70px;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
+    border: 1px dashed rgba(0, 73, 144, 0.2);
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .product-card__body {
@@ -544,10 +548,51 @@ a:focus {
     color: var(--text-muted);
 }
 
-.store-list {
+ .store-list {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+}
+
+.store-dropdown {
+    border: 1px dashed rgba(0, 73, 144, 0.25);
+    border-radius: 12px;
+    padding: 0.4rem 0.9rem 0.9rem;
+    background: rgba(0, 73, 144, 0.04);
+}
+
+.store-dropdown summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--lowes-blue);
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+.store-dropdown summary::marker {
+    display: none;
+}
+
+.store-dropdown summary::after {
+    content: "▾";
+    font-size: 0.9rem;
+    margin-left: 0.4rem;
+    transition: transform 0.2s ease;
+}
+
+.store-dropdown[open] summary::after {
+    transform: rotate(180deg);
+}
+
+.store-dropdown__content {
+    margin-top: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 0.25rem;
 }
 
 .store-row {

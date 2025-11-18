@@ -1257,7 +1257,7 @@ async def _run_cycle(
             apply_stealth(playwright)
             browser, persistent_context = await launch_browser(playwright)
 
-            raw_max = config.get("max_concurrency", 3)
+            raw_max = config.get("max_concurrency", 2)
             try:
                 configured_max = int(raw_max)
             except (TypeError, ValueError):
@@ -1407,191 +1407,191 @@ async def _run_cycle(
                 return items, alerts, row_count
 
             async def _process_zip(zip_code: str) -> tuple[int, int, bool, int]:
-                async with semaphore:
-                    try:
-                        zip_extra = {"zip": zip_code}
-                        metrics.emit("zip_started", zip=zip_code, run_id=run_id)
-                        rows = await _scrape_zip_with_recovery(
+                try:
+                    zip_extra = {"zip": zip_code}
+                    metrics.emit("zip_started", zip=zip_code, run_id=run_id)
+                    rows = await _scrape_zip_with_recovery(
+                        zip_code,
+                        zip_extra=zip_extra,
+                    )
+                except StoreContextError as exc:
+                    LOGGER.error(
+                        "Unable to set store for ZIP %s: %s",
+                        zip_code,
+                        exc,
+                        extra=zip_extra,
+                    )
+                    health_monitor.record_dom_error(
+                        zip_code=zip_code,
+                        reason="store_context_error",
+                        details={"message": str(exc)},
+                    )
+                    metrics.emit(
+                        "zip_error",
+                        zip=zip_code,
+                        reason="store_context",
+                        run_id=run_id,
+                    )
+                    count = store_context_failures[zip_code] + 1
+                    store_context_failures[zip_code] = count
+                    if count < STORE_CONTEXT_MAX_RETRIES:
+                        LOGGER.info(
+                            "Queueing ZIP %s for retry (%s/%s)",
                             zip_code,
-                            zip_extra=zip_extra,
+                            count,
+                            STORE_CONTEXT_MAX_RETRIES,
                         )
-                    except StoreContextError as exc:
-                        LOGGER.error(
-                            "Unable to set store for ZIP %s: %s",
-                            zip_code,
-                            exc,
-                            extra=zip_extra,
-                        )
-                        health_monitor.record_dom_error(
-                            zip_code=zip_code,
-                            reason="store_context_error",
-                            details={"message": str(exc)},
-                        )
-                        metrics.emit(
-                            "zip_error",
-                            zip=zip_code,
-                            reason="store_context",
-                            run_id=run_id,
-                        )
-                        count = store_context_failures[zip_code] + 1
-                        store_context_failures[zip_code] = count
-                        if count < STORE_CONTEXT_MAX_RETRIES:
-                            LOGGER.info(
-                                "Queueing ZIP %s for retry (%s/%s)",
-                                zip_code,
-                                count,
-                                STORE_CONTEXT_MAX_RETRIES,
-                            )
-                            await _schedule_store_retry(zip_code, skip=False)
-                        else:
-                            LOGGER.error(
-                                "Skipping ZIP %s after %s store-context failures",
-                                zip_code,
-                                count,
-                            )
-                            await _schedule_store_retry(zip_code, skip=True)
-                        return 0, 0, False, 0
-                    except SelectorChangedError as exc:
-                        extra = {
-                            "zip": zip_code,
-                            "category": getattr(exc, "category", None),
-                            "url": getattr(exc, "url", None),
-                        }
-                        LOGGER.warning(
-                            "No products parsed for ZIP %s (category=%s url=%s): %s",
-                            zip_code,
-                            extra["category"] or "unknown",
-                            extra["url"] or "unknown",
-                            exc,
-                            extra=extra,
-                        )
-                        _record_selector_quarantine(
-                            session_factory,
-                            stats,
-                            zip_code=zip_code,
-                            category=extra["category"],
-                            url=extra["url"],
-                            error=exc,
-                            dry_run=dry_run,
-                        )
-                        cached_rows = load_snapshot(SNAPSHOT_DIR, zip_code, SNAPSHOT_TTL_MINUTES)
-                        if cached_rows:
-                            metrics.emit(
-                                "zip_snapshot_used",
-                                zip=zip_code,
-                                rows=len(cached_rows),
-                                run_id=run_id,
-                            )
-                            items, alerts, row_count = await _consume_rows(
-                                cached_rows, zip_code, snapshot_used=True
-                            )
-                            metrics.emit(
-                                "zip_finished",
-                                zip=zip_code,
-                                rows=row_count,
-                                run_id=run_id,
-                            )
-                            return items, alerts, True, row_count
-                        health_monitor.record_dom_error(
-                            zip_code=zip_code,
-                            reason="selector_changed",
-                            details=extra,
-                        )
-                        metrics.emit(
-                            "zip_error",
-                            zip=zip_code,
-                            reason="selector_changed",
-                            run_id=run_id,
-                        )
-                        return 0, 0, False, 0
-                    except PageLoadError as exc:
-                        extra = {
-                            "zip": zip_code,
-                            "category": getattr(exc, "category", None),
-                            "url": getattr(exc, "url", None),
-                        }
-                        LOGGER.warning(
-                            "Page load error for ZIP %s (category=%s url=%s): %s",
-                            zip_code,
-                            extra["category"] or "unknown",
-                            extra["url"] or "unknown",
-                            exc,
-                            extra=extra,
-                        )
-                        health_monitor.record_http_error(
-                            zip_code=zip_code,
-                            reason="page_load",
-                            details=extra,
-                        )
-                        metrics.emit(
-                            "zip_error",
-                            zip=zip_code,
-                            reason="page_load",
-                            run_id=run_id,
-                        )
-                        return 0, 0, False, 0
-                    except Exception as exc:  # pragma: no cover - defensive
-                        LOGGER.exception(
-                            "Unexpected failure scraping ZIP %s: %s",
-                            zip_code,
-                            exc,
-                            extra=zip_extra,
-                        )
-                        health_monitor.record_http_error(
-                            zip_code=zip_code,
-                            reason="unexpected_error",
-                            details={"message": str(exc)},
-                        )
-                        metrics.emit(
-                            "zip_error",
-                            zip=zip_code,
-                            reason="unexpected_error",
-                            run_id=run_id,
-                        )
-                        return 0, 0, False, 0
-
+                        await _schedule_store_retry(zip_code, skip=False)
                     else:
-                        if not rows:
-                            LOGGER.info(
-                                "Scrape returned no rows for ZIP %s; continuing",
-                                zip_code,
-                                extra=zip_extra,
-                            )
-                            metrics.emit(
-                                "zip_finished",
-                                zip=zip_code,
-                                rows=0,
-                                run_id=run_id,
-                            )
-                            return 0, 0, True, 0
-
-                        items, alerts, row_count = await _consume_rows(rows, zip_code)
+                        LOGGER.error(
+                            "Skipping ZIP %s after %s store-context failures",
+                            zip_code,
+                            count,
+                        )
+                        await _schedule_store_retry(zip_code, skip=True)
+                    return 0, 0, False, 0
+                except SelectorChangedError as exc:
+                    extra = {
+                        "zip": zip_code,
+                        "category": getattr(exc, "category", None),
+                        "url": getattr(exc, "url", None),
+                    }
+                    LOGGER.warning(
+                        "No products parsed for ZIP %s (category=%s url=%s): %s",
+                        zip_code,
+                        extra["category"] or "unknown",
+                        extra["url"] or "unknown",
+                        exc,
+                        extra=extra,
+                    )
+                    _record_selector_quarantine(
+                        session_factory,
+                        stats,
+                        zip_code=zip_code,
+                        category=extra["category"],
+                        url=extra["url"],
+                        error=exc,
+                        dry_run=dry_run,
+                    )
+                    cached_rows = load_snapshot(SNAPSHOT_DIR, zip_code, SNAPSHOT_TTL_MINUTES)
+                    if cached_rows:
+                        metrics.emit(
+                            "zip_snapshot_used",
+                            zip=zip_code,
+                            rows=len(cached_rows),
+                            run_id=run_id,
+                        )
+                        items, alerts, row_count = await _consume_rows(
+                            cached_rows, zip_code, snapshot_used=True
+                        )
                         metrics.emit(
                             "zip_finished",
                             zip=zip_code,
                             rows=row_count,
                             run_id=run_id,
                         )
-                        if not dry_run:
-                            store_snapshot(SNAPSHOT_DIR, zip_code, rows)
                         return items, alerts, True, row_count
-                    finally:
-                        await _zip_pause()
-                        extra_delay = health_monitor.recommended_extra_delay()
-                        if extra_delay > 0:
-                            LOGGER.debug(
-                                "Health state %s -> sleeping extra %.1fs",
-                                health_monitor.state.value,
-                                extra_delay,
-                            )
-                            await asyncio.sleep(extra_delay)
+                    health_monitor.record_dom_error(
+                        zip_code=zip_code,
+                        reason="selector_changed",
+                        details=extra,
+                    )
+                    metrics.emit(
+                        "zip_error",
+                        zip=zip_code,
+                        reason="selector_changed",
+                        run_id=run_id,
+                    )
+                    return 0, 0, False, 0
+                except PageLoadError as exc:
+                    extra = {
+                        "zip": zip_code,
+                        "category": getattr(exc, "category", None),
+                        "url": getattr(exc, "url", None),
+                    }
+                    LOGGER.warning(
+                        "Page load error for ZIP %s (category=%s url=%s): %s",
+                        zip_code,
+                        extra["category"] or "unknown",
+                        extra["url"] or "unknown",
+                        exc,
+                        extra=extra,
+                    )
+                    health_monitor.record_http_error(
+                        zip_code=zip_code,
+                        reason="page_load",
+                        details=extra,
+                    )
+                    metrics.emit(
+                        "zip_error",
+                        zip=zip_code,
+                        reason="page_load",
+                        run_id=run_id,
+                    )
+                    return 0, 0, False, 0
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.exception(
+                        "Unexpected failure scraping ZIP %s: %s",
+                        zip_code,
+                        exc,
+                        extra=zip_extra,
+                    )
+                    health_monitor.record_http_error(
+                        zip_code=zip_code,
+                        reason="unexpected_error",
+                        details={"message": str(exc)},
+                    )
+                    metrics.emit(
+                        "zip_error",
+                        zip=zip_code,
+                        reason="unexpected_error",
+                        run_id=run_id,
+                    )
+                    return 0, 0, False, 0
 
-            zip_cursor_lock = asyncio.Lock()
+                else:
+                    if not rows:
+                        LOGGER.info(
+                            "Scrape returned no rows for ZIP %s; continuing",
+                            zip_code,
+                            extra=zip_extra,
+                        )
+                        metrics.emit(
+                            "zip_finished",
+                            zip=zip_code,
+                            rows=0,
+                            run_id=run_id,
+                        )
+                        return 0, 0, True, 0
+
+                    items, alerts, row_count = await _consume_rows(rows, zip_code)
+                    metrics.emit(
+                        "zip_finished",
+                        zip=zip_code,
+                        rows=row_count,
+                        run_id=run_id,
+                    )
+                    if not dry_run:
+                        store_snapshot(SNAPSHOT_DIR, zip_code, rows)
+                    return items, alerts, True, row_count
+                finally:
+                    await _zip_pause()
+                    extra_delay = health_monitor.recommended_extra_delay()
+                    if extra_delay > 0:
+                        LOGGER.debug(
+                            "Health state %s -> sleeping extra %.1fs",
+                            health_monitor.state.value,
+                            extra_delay,
+                        )
+                        await asyncio.sleep(extra_delay)
+
+        zip_cursor_lock = asyncio.Lock()
             restart_counter_lock = asyncio.Lock()
             zips_since_restart = 0
 
             async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
                 nonlocal zips_since_restart
+                await semaphore.acquire()
                 try:
                     result = await asyncio.wait_for(
                         _process_zip(zip_code),
@@ -1610,7 +1610,11 @@ async def _run_cycle(
                         reason="zip_timeout",
                         run_id=run_id,
                     )
-                    result = (0, 0, False, 0)
+                    await _schedule_store_retry(zip_code, skip=False)
+                    return zip_code, 0, 0, False, 0
+                finally:
+                    semaphore.release()
+
                 items, alerts, success, row_count = result
                 if success:
                     async with zip_cursor_lock:
@@ -2202,7 +2206,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
     if not categories:
         raise RuntimeError("No categories matched the provided filter.")
 
-        engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
+    engine = get_engine(config.get("output", {}).get("sqlite_path", "orwa_lowes.sqlite"))
     if args.validate:
         LOGGER.info("Validate mode: skipping database schema initialisation")
     else:
@@ -2335,9 +2339,11 @@ def main() -> None:
         LOGGER.info("Interrupted by user")
 
 
-if __name__ == "__main__":
-    main()
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
+ZIP_HISTORY_FILE = Path(os.getenv("CHEAPSKATER_ZIP_HISTORY", "logs/zip_history.json"))
 ZIP_RESUME_ENABLED = os.getenv("CHEAPSKATER_RESUME_ZIPS", "1") not in {"0", "false", "False"}
 ZIP_PROGRESS_TIMEOUT_MINUTES = float(os.getenv("CHEAPSKATER_ZIP_TIMEOUT_MINUTES", "45"))
 BROWSER_ZIP_RESTART_LIMIT = max(0, int(os.getenv("CHEAPSKATER_BROWSER_ZIP_LIMIT", "10")))
+
+if __name__ == "__main__":
+    main()

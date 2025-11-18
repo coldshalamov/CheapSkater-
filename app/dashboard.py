@@ -76,6 +76,13 @@ async def not_found_handler(request: Request, exc: HTTPException) -> PlainTextRe
 
 Scope = Literal["all", "new"]
 STATE_OPTIONS = ["ALL", "WA", "OR"]
+SORT_OPTIONS = [
+    ("newest", "Newest first"),
+    ("alpha_asc", "Title A → Z"),
+    ("alpha_desc", "Title Z → A"),
+    ("price_low", "Price: Low → High"),
+    ("price_high", "Price: High → Low"),
+]
 DEFAULT_CATEGORY_OPTIONS = [
     "Roofing",
     "Drywall",
@@ -117,6 +124,15 @@ def _normalize_store_number(value: str | None) -> str:
     return text
 
 
+def _canonical_store_details(store_number: str | None) -> dict[str, str] | None:
+    """Look up canonical store metadata from the WA/OR registry."""
+
+    normalized = _normalize_store_number(store_number)
+    if not normalized:
+        return None
+    return LOWES_STORES_WA_OR.get(normalized)
+
+
 def _strip_store_status_text(value: str | None) -> str | None:
     if not value:
         return None
@@ -133,13 +149,13 @@ def _strip_store_status_text(value: str | None) -> str | None:
 def normalize_store_label(store_number: str | None, store_name_raw: str | None) -> str:
     """Resolve a user-facing store label, preferring the canonical address."""
 
-    normalized_number = _normalize_store_number(store_number)
-    details = LOWES_STORES_WA_OR.get(normalized_number)
-    if details:
+    details = _canonical_store_details(store_number)
+    if details and details.get("address"):
         return details["address"]
     cleaned = _strip_store_status_text(store_name_raw)
     if cleaned:
         return cleaned
+    normalized_number = _normalize_store_number(store_number)
     if normalized_number:
         return f"Lowe's #{normalized_number}"
     return "Lowe's Store"
@@ -230,8 +246,6 @@ def _estimate_stock_units(availability: str | None) -> int | None:
         return 0
     if "limited" in normalized:
         return 1
-    if "in stock" in normalized:
-        return 5
     if "only" in normalized:
         return 1
     return None
@@ -301,9 +315,11 @@ def _normalize_filters(
     time_window: str | None,
     discount_filter: str | None,
     discount_min: str | float | None,
+    discount_max: str | float | None,
     stock_filter: str | None,
     stock_min: str | int | None,
     stock_max: str | int | None,
+    sort_order: str | None,
 ) -> dict[str, Any]:
     normalized_time = time_window if any(opt[0] == time_window for opt in TIME_FILTER_OPTIONS) else "all"
     delta = _time_delta_for(normalized_time)
@@ -318,11 +334,16 @@ def _normalize_filters(
         if min_value is not None and value not in {"all", "custom"}
     }
     min_pct = None
+    max_pct = None
     if discount_choice in preset_discounts:
         min_pct = preset_discounts[discount_choice]
     elif discount_choice == "custom":
         parsed_min = _sanitize_percent(_as_float(discount_min))
+        parsed_max = _sanitize_percent(_as_float(discount_max))
         min_pct = parsed_min
+        max_pct = parsed_max
+        if min_pct is not None and max_pct is not None and max_pct < min_pct:
+            min_pct, max_pct = max_pct, min_pct
     else:
         discount_choice = "all"
 
@@ -346,15 +367,20 @@ def _normalize_filters(
     else:
         stock_choice = "all"
 
+    sort_choice = sort_order if sort_order in {value for value, _ in SORT_OPTIONS} else "newest"
+
     return {
         "time_window": normalized_time,
         "time_cutoff": cutoff,
         "discount_choice": discount_choice,
         "discount_min_pct": min_pct,
+        "discount_max_pct": max_pct,
         "discount_min": (min_pct / 100.0) if min_pct is not None else None,
+        "discount_max": (max_pct / 100.0) if max_pct is not None else None,
         "stock_choice": stock_choice,
         "stock_min": stock_floor,
         "stock_max": stock_ceiling,
+        "sort_choice": sort_choice,
     }
 
 
@@ -392,6 +418,48 @@ STOCK_FILTER_OPTIONS = [
 ]
 
 
+def _sort_groups(groups: list[dict[str, Any]], sort_choice: str | None) -> list[dict[str, Any]]:
+    """Return *groups* ordered according to the requested sort."""
+
+    choice = sort_choice or "newest"
+
+    def _timestamp_key(group: dict[str, Any]) -> datetime:
+        ts = group.get("last_seen") or group.get("added_at")
+        dt_value = _coerce_datetime(ts)
+        if dt_value:
+            return dt_value
+        return datetime.fromtimestamp(0, timezone.utc)
+
+    def _alpha_key(group: dict[str, Any]) -> tuple[str, str]:
+        title = (group.get("title") or "").strip().lower()
+        sku = (group.get("sku") or "").strip().lower()
+        return (title, sku)
+
+    def _price_key(group: dict[str, Any]) -> tuple[int, float]:
+        price = group.get("min_price")
+        if price is None:
+            return (1, float("inf"))
+        return (0, float(price))
+
+    def _price_desc_key(group: dict[str, Any]) -> tuple[int, float]:
+        price = group.get("min_price")
+        if price is None:
+            return (1, 0.0)
+        return (0, -float(price))
+
+    if choice == "alpha_asc":
+        groups.sort(key=_alpha_key)
+    elif choice == "alpha_desc":
+        groups.sort(key=_alpha_key, reverse=True)
+    elif choice == "price_low":
+        groups.sort(key=_price_key)
+    elif choice == "price_high":
+        groups.sort(key=_price_desc_key)
+    else:
+        groups.sort(key=_timestamp_key, reverse=True)
+    return groups
+
+
 def _store_specific_url(url: str | None, store_id: str | None) -> str | None:
     if not url:
         return None
@@ -417,10 +485,14 @@ def _clean_store_name(value: str | None) -> str | None:
 
 
 def _format_store_label(listing: dict[str, Any]) -> str:
+    details = _canonical_store_details(listing.get("store_id"))
+    if details and details.get("address"):
+        return details["address"]
+
     name = _clean_store_name(listing.get("store_name"))
     city = (listing.get("store_city") or "").strip()
     state = (listing.get("store_state") or "").strip()
-    store_id = (listing.get("store_id") or "").strip()
+    store_id = _normalize_store_number(listing.get("store_id"))
 
     label = name or ""
     if not label and city:
@@ -430,17 +502,27 @@ def _format_store_label(listing: dict[str, Any]) -> str:
     if not label:
         label = "Lowe's Store"
     if city and city.lower() not in label.lower():
-        label = f"{label} – {city}"
+        label = f"{label} — {city}"
     elif state and state not in label:
         label = f"{label} ({state})"
     return label
 
 
 def _format_store_tooltip(listing: dict[str, Any]) -> str:
+    details = _canonical_store_details(listing.get("store_id"))
+    if details:
+        store_id = _normalize_store_number(listing.get("store_id"))
+        parts = [details.get("name")]
+        if store_id:
+            parts.append(f"Store #{store_id}")
+        if details.get("address"):
+            parts.append(details["address"])
+        return " • ".join(part for part in parts if part)
+
     city = (listing.get("store_city") or "").strip()
     state = (listing.get("store_state") or "").strip()
     zip_code = (listing.get("store_zip") or "").strip()
-    store_id = (listing.get("store_id") or "").strip()
+    store_id = _normalize_store_number(listing.get("store_id"))
     parts = [part for part in [city, state, zip_code] if part]
     details = ", ".join(parts)
     if store_id:
@@ -576,6 +658,18 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         "stock_label": listing.get("stock_label"),
         "days_since_added": _relative_days(listing.get("first_seen") or listing.get("price_started_at")),
     }
+    canonical = _canonical_store_details(listing.get("store_id"))
+    if canonical:
+        if canonical.get("address"):
+            payload["store_address"] = canonical["address"]
+        if canonical.get("city") and not (payload.get("store_city") or "").strip():
+            payload["store_city"] = canonical["city"]
+        if canonical.get("state") and not (payload.get("store_state") or "").strip():
+            payload["store_state"] = canonical["state"]
+        if canonical.get("zip") and not (payload.get("store_zip") or "").strip():
+            payload["store_zip"] = canonical["zip"]
+        if canonical.get("name") and not (payload.get("store_name") or "").strip():
+            payload["store_name"] = canonical["name"]
     return payload
 
 
@@ -1053,6 +1147,7 @@ def _render_dashboard(
     prepared_items = _prepare_listings(raw_items)
     items = _apply_filters(prepared_items, filters=filters)
     grouped = _group_listings(items)
+    grouped = _sort_groups(grouped, filters.get("sort_choice"))
     serialized_groups = [_serialize_group(group) for group in grouped]
     initial_groups = serialized_groups[:INITIAL_GROUP_BATCH]
     LOGGER.info(
@@ -1088,6 +1183,7 @@ def _render_dashboard(
             "time_filter_options": TIME_FILTER_OPTIONS,
             "discount_filter_options": DISCOUNT_FILTER_OPTIONS,
             "stock_filter_options": STOCK_FILTER_OPTIONS,
+            "sort_filter_options": SORT_OPTIONS,
         },
     )
 
@@ -1135,11 +1231,15 @@ def list_clearance(
     discount_min: str | None = Query(
         None, description="Custom minimum discount percentage."
     ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
     stock_filter: str | None = Query(
         None, description="Stock preset (quantity or custom)."
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
     """Render the full clearance dashboard."""
@@ -1150,9 +1250,11 @@ def list_clearance(
         time_window=time_window,
         discount_filter=discount_filter,
         discount_min=discount_min,
+        discount_max=discount_max,
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        sort_order=sort_order,
     )
 
     return _render_dashboard(
@@ -1177,11 +1279,15 @@ def list_new_clearance_today(
     discount_min: str | None = Query(
         None, description="Custom minimum discount percentage."
     ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
     stock_filter: str | None = Query(
         None, description="Stock preset (quantity or custom)."
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
     """Render a page listing items that became clearance deals today."""
@@ -1192,9 +1298,11 @@ def list_new_clearance_today(
         time_window=time_window,
         discount_filter=discount_filter,
         discount_min=discount_min,
+        discount_max=discount_max,
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        sort_order=sort_order,
     )
 
     return _render_dashboard(
@@ -1217,9 +1325,11 @@ def export_excel(
         None, description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
+    discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
     stock_filter: str | None = Query(None, description="Stock preset (quantity or custom)."),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
     """Return an Excel workbook for the current filter selection."""
@@ -1230,9 +1340,11 @@ def export_excel(
         time_window=time_window,
         discount_filter=discount_filter,
         discount_min=discount_min,
+        discount_max=discount_max,
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        sort_order=sort_order,
     )
     raw_items = _select_items(
         session, scope=scope, state=normalized_state, category=normalized_category
@@ -1347,9 +1459,11 @@ def api_clearance(
         None, description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
+    discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
     stock_filter: str | None = Query(None, description="Stock preset (quantity or custom)."),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
     """Return clearance items as JSON data."""
@@ -1360,9 +1474,11 @@ def api_clearance(
         time_window=time_window,
         discount_filter=discount_filter,
         discount_min=discount_min,
+        discount_max=discount_max,
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        sort_order=sort_order,
     )
     raw_items = _select_items(
         session,
@@ -1373,6 +1489,7 @@ def api_clearance(
     prepared_items = _prepare_listings(raw_items)
     items = _apply_filters(prepared_items, filters=filters)
     grouped = _group_listings(items)
+    grouped = _sort_groups(grouped, filters.get("sort_choice"))
     payload = [_serialize_observation(item) for item in items]
     grouped_payload = [_serialize_group(group) for group in grouped]
     filters_payload = {
@@ -1382,9 +1499,11 @@ def api_clearance(
         else None,
         "discount_choice": filters.get("discount_choice"),
         "discount_min_pct": filters.get("discount_min_pct"),
+        "discount_max_pct": filters.get("discount_max_pct"),
         "stock_choice": filters.get("stock_choice"),
         "stock_min": filters.get("stock_min"),
         "stock_max": filters.get("stock_max"),
+        "sort_choice": filters.get("sort_choice"),
     }
     return JSONResponse(
         content={

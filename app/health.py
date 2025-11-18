@@ -47,6 +47,17 @@ class HealthMonitor:
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    @staticmethod
+    def _sanitize_details(details: dict[str, Any] | None) -> dict[str, Any]:
+        """Prevent reserved keys from colliding with _log() parameters."""
+
+        if not details:
+            return {}
+        clean = dict(details)
+        if "message" in clean:
+            clean["detail_message"] = clean.pop("message")
+        return clean
+
     def _evaluate_state(self) -> None:
         prev = self.state
         if (
@@ -98,7 +109,7 @@ class HealthMonitor:
             reason,
             zip=zip_code,
             http_errors=self.http_errors,
-            **(details or {}),
+            **self._sanitize_details(details),
         )
         self._evaluate_state()
 
@@ -109,7 +120,7 @@ class HealthMonitor:
             reason,
             zip=zip_code,
             dom_errors=self.dom_errors,
-            **(details or {}),
+            **self._sanitize_details(details),
         )
         self._evaluate_state()
 
@@ -125,4 +136,3 @@ class HealthMonitor:
         if self.state == HealthState.BLOCKED:
             return 15.0
         return 0.0
-

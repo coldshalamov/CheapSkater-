@@ -65,7 +65,7 @@ python -m app.main --discover-stores
 
 ## Running the scraper
 
-* One-off cycle (all WA/OR ZIPs, three-at-a-time concurrency):
+* One-off cycle (all WA/OR ZIPs, two-at-a-time concurrency):
 
   ```bash
   python -m app.main --once
@@ -144,7 +144,7 @@ All of these knobs are exposed as environment variables (see `launch.bat` for co
 * `--dashboard` — launch the FastAPI dashboard alongside the scheduler.
 * `--zip 98101,97223` — override the discovered ZIP list (comma separated).
 * `--categories "roof|insulation"` — regex filter applied to catalog names.
-* `--concurrency N` — number of ZIPs processed concurrently (defaults to `3`).
+* `--concurrency N` — number of ZIPs processed concurrently (defaults to `2`).
 
 ## Alerts
 
