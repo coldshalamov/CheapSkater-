@@ -958,6 +958,10 @@ a:focus {
     color: var(--text-muted);
 }
 
+.scroll-sentinel {
+    height: 48px;
+}
+
 @media (max-width: 960px) {
     .toolbar-actions {
         width: 100%;

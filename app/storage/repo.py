@@ -403,7 +403,7 @@ def get_clearance_items(
     *,
     state: str | None = None,
     category: str | None = None,
-    limit: int = 1000,
+    limit: int | None = None,
 ) -> list[dict[str, object]]:
     """Return the latest clearance listings per store/SKU."""
 
@@ -412,7 +412,9 @@ def get_clearance_items(
         subquery.c.pct_off.desc().nullslast(),
         subquery.c.price.asc().nullslast(),
         subquery.c.updated_at.desc(),
-    ).limit(limit)
+    )
+    if limit:
+        stmt = stmt.limit(limit)
     rows = session.execute(stmt).all()
     return [_row_to_listing(row) for row in rows]
 
@@ -446,7 +448,7 @@ def get_clearance_by_category(
     category: str,
     *,
     state: str | None = None,
-    limit: int = 1000,
+    limit: int | None = None,
 ) -> list[Observation]:
     """Return clearance observations filtered by category name."""
 

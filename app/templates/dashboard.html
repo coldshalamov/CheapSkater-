@@ -71,7 +71,7 @@
         </div>
         <div class="filter-group search-field">
             <label for="search" class="filter-label">Search</label>
-            <input type="search" id="search" placeholder="SKU, store, keyword…" autocomplete="off" spellcheck="false">
+            <input type="search" id="search" placeholder="SKU, store, keyword..." autocomplete="off" spellcheck="false">
         </div>
         <div class="filter-actions">
             <button type="submit" class="btn tertiary">Apply Filters</button>
@@ -136,14 +136,14 @@
                     <div class="product-pricing">
                         <div class="price-current">
                             {% if min_price %}
-                                {{ min_price }}{% if max_price and max_price != min_price %} – {{ max_price }}{% endif %}
+                                {{ min_price }}{% if max_price and max_price != min_price %} - {{ max_price }}{% endif %}
                             {% else %}
                                 Price unavailable
                             {% endif %}
                         </div>
                         {% if min_was %}
                         <div class="price-was">
-                            Regular {{ min_was }}{% if max_was and max_was != min_was %} – {{ max_was }}{% endif %}
+                            Regular {{ min_was }}{% if max_was and max_was != min_was %} - {{ max_was }}{% endif %}
                         </div>
                         {% endif %}
                         {% if price_spread %}
@@ -151,13 +151,13 @@
                         {% endif %}
                         {% if min_savings %}
                         <div class="price-savings">
-                            Save {{ min_savings }}{% if max_savings and max_savings != min_savings %} – {{ max_savings }}{% endif %}
+                            Save {{ min_savings }}{% if max_savings and max_savings != min_savings %} - {{ max_savings }}{% endif %}
                         </div>
                         {% endif %}
                         {% if min_pct is not none %}
                         <span class="discount-badge">
                             {% if max_pct and max_pct != min_pct %}
-                                {{ min_pct|int }}%–{{ max_pct|int }}% off
+                                {{ min_pct|int }}%-{{ max_pct|int }}% off
                             {% else %}
                                 {{ min_pct|int }}% off
                             {% endif %}
@@ -195,14 +195,14 @@
                     <div class="store-details">
                         <div class="store-name" title="{{ store_tip }}">{{ store_label or 'Unknown store' }}</div>
                         <div class="store-location">
-                            {{ store.store_state or state_from_zip(store.store_zip) or '–' }} {% if store.store_zip %}{{ store.store_zip }}{% endif %}
+                            {{ store.store_state or state_from_zip(store.store_zip) or '-' }} {% if store.store_zip %}{{ store.store_zip }}{% endif %}
                         </div>
                     </div>
                     <div class="store-pricing">
                         {% if store.price is not none %}
                         <div class="price">{{ format_currency(store.price) }}</div>
                         {% else %}
-                        <div class="price muted">–</div>
+                        <div class="price muted">-</div>
                         {% endif %}
                         {% if store.price_was %}
                         <div class="was-price">Was {{ format_currency(store.price_was) }}</div>
@@ -268,14 +268,14 @@
                             <div class="store-details">
                                 <div class="store-name" title="{{ store_tip }}">{{ store_label or 'Unknown store' }}</div>
                                 <div class="store-location">
-                                    {{ store.store_state or state_from_zip(store.store_zip) or '–' }} {% if store.store_zip %}{{ store.store_zip }}{% endif %}
+                                    {{ store.store_state or state_from_zip(store.store_zip) or '-' }} {% if store.store_zip %}{{ store.store_zip }}{% endif %}
                                 </div>
                             </div>
                             <div class="store-pricing">
                                 {% if store.price is not none %}
                                 <div class="price">{{ format_currency(store.price) }}</div>
                                 {% else %}
-                                <div class="price muted">–</div>
+                                <div class="price muted">-</div>
                                 {% endif %}
                                 {% if store.price_was %}
                                 <div class="was-price">Was {{ format_currency(store.price_was) }}</div>
@@ -320,7 +320,7 @@
         </article>
         {% endfor %}
     </div>
-    <div id="scroll-sentinel" aria-hidden="true"></div>
+    <div id="scroll-sentinel" class="scroll-sentinel" aria-hidden="true"></div>
     <p class="no-results" id="no-results-message" hidden>No clearance items match your filters. Try another search.</p>
     <script id="group-data" type="application/json">{{ group_json|safe }}</script>
 </section>
@@ -397,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const minPct = Math.floor(group.min_pct_off * 100);
     if (group.max_pct_off !== null && group.max_pct_off !== undefined && group.max_pct_off !== group.min_pct_off) {
       const maxPct = Math.floor(group.max_pct_off * 100);
-      return `${minPct}%–${maxPct}% off`;
+      return `${minPct}% - ${maxPct}% off`;
     }
     return `${minPct}% off`;
   };
@@ -416,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (minValue === null || minValue === undefined) return '';
     const base = `${prefix} ${formatCurrency(minValue)}`;
     if (maxValue !== null && maxValue !== undefined && maxValue !== minValue) {
-      return `${base} – ${formatCurrency(maxValue)}`;
+      return `${base} - ${formatCurrency(maxValue)}`;
     }
     return base;
   };
@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="store-pricing">
-          <div class="price">${store.price !== null && store.price !== undefined ? formatCurrency(store.price) : '<span class="muted">—</span>'}</div>
+          <div class="price">${store.price !== null && store.price !== undefined ? formatCurrency(store.price) : '<span class="muted">-</span>'}</div>
           ${store.price_was ? `<div class="was-price">Was ${formatCurrency(store.price_was)}</div>` : ''}
           ${savings ? `<div class="store-savings">Save ${formatCurrency(savings)}</div>` : ''}
           ${savingsPct !== null ? `<div class="store-savings pct">${savingsPct}% off</div>` : ''}
@@ -514,7 +514,6 @@ document.addEventListener('DOMContentLoaded', () => {
       ${dropdown}
     </div>`;
   };
-  };
 
   const buildCard = (group) => {
     const keywords = [
@@ -526,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .toLowerCase();
     const discount = formatDiscount(group);
     const priceCurrent = group.min_price !== null && group.min_price !== undefined
-      ? `${formatCurrency(group.min_price)}${group.max_price !== null && group.max_price !== undefined && group.max_price !== group.min_price ? ` – ${formatCurrency(group.max_price)}` : ''}`
+      ? `${formatCurrency(group.min_price)}${group.max_price !== null && group.max_price !== undefined && group.max_price !== group.min_price ? ` - ${formatCurrency(group.max_price)}` : ''}`
       : 'Price unavailable';
     const regularPrice = group.min_price_was !== null && group.min_price_was !== undefined
       ? formatRangeText(group.min_price_was, group.max_price_was, 'Was')
@@ -535,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `Spread ${formatCurrency(group.price_spread)}`
       : '';
     const savingsText = group.min_savings !== null && group.min_savings !== undefined
-      ? `Save ${formatCurrency(group.min_savings)}${group.max_savings !== null && group.max_savings !== undefined && group.max_savings !== group.min_savings ? ` – ${formatCurrency(group.max_savings)}` : ''}`
+      ? `Save ${formatCurrency(group.min_savings)}${group.max_savings !== null && group.max_savings !== undefined && group.max_savings !== group.min_savings ? ` - ${formatCurrency(group.max_savings)}` : ''}`
       : '';
     const storeCountText = `${group.locations} store${group.locations === 1 ? '' : 's'} with this price`;
     const addedAgo = Number.isFinite(group.days_since_added)
