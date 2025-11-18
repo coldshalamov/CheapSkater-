@@ -121,7 +121,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     ],
     "quarantine_retention_days": 7,
     "healthcheck_url": "",
-    "max_concurrency": 3,
+    # Keep concurrency low to reduce Akamai risk on Back Aisle fetches.
+    "max_concurrency": 1,
 }
 
 def _parse_threshold(env_suspect: str, env_block: str, default_suspect: int, default_block: int) -> tuple[int, int]:
@@ -1586,52 +1587,51 @@ async def _run_cycle(
                         await asyncio.sleep(extra_delay)
 
         zip_cursor_lock = asyncio.Lock()
-            restart_counter_lock = asyncio.Lock()
-            zips_since_restart = 0
+        restart_counter_lock = asyncio.Lock()
+        zips_since_restart = 0
 
-            async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
-                nonlocal zips_since_restart
-                await semaphore.acquire()
-                try:
-                    result = await asyncio.wait_for(
-                        _process_zip(zip_code),
-                        timeout=zip_timeout_seconds,
-                    )
-                except asyncio.TimeoutError:
-                    LOGGER.error(
-                        "ZIP %s timed out after %.1f minutes; restarting browser",
-                        zip_code,
-                        ZIP_PROGRESS_TIMEOUT_MINUTES,
-                    )
-                    await _restart_browser("zip_timeout")
-                    metrics.emit(
-                        "zip_error",
-                        zip=zip_code,
-                        reason="zip_timeout",
-                        run_id=run_id,
-                    )
-                    await _schedule_store_retry(zip_code, skip=False)
-                    return zip_code, 0, 0, False, 0
-                finally:
-                    semaphore.release()
+        async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
+            nonlocal zips_since_restart
+            await semaphore.acquire()
+            try:
+                result = await asyncio.wait_for(
+                    _process_zip(zip_code),
+                    timeout=zip_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                LOGGER.error(
+                    "ZIP %s timed out after %.1f minutes; restarting browser",
+                    zip_code,
+                    ZIP_PROGRESS_TIMEOUT_MINUTES,
+                )
+                await _restart_browser("zip_timeout")
+                metrics.emit(
+                    "zip_error",
+                    zip=zip_code,
+                    reason="zip_timeout",
+                    run_id=run_id,
+                )
+                await _schedule_store_retry(zip_code, skip=False)
+                return zip_code, 0, 0, False, 0
+            finally:
+                semaphore.release()
 
-                items, alerts, success, row_count = result
-                if success:
-                    async with zip_cursor_lock:
-                        cursor_timestamp = _persist_zip_cursor(zip_code)
-                    zip_tracker.record_success(zip_code, cursor_timestamp)
-                if browser_restart_interval:
-                    async with restart_counter_lock:
-                        nonlocal zips_since_restart
-                        zips_since_restart += 1
-                        if zips_since_restart >= browser_restart_interval:
-                            LOGGER.info(
-                                "Restarting browser after %s ZIPs to avoid resource exhaustion",
-                                browser_restart_interval,
-                            )
-                            await _restart_browser("zip_interval")
-                            zips_since_restart = 0
-                return zip_code, items, alerts, success, row_count
+            items, alerts, success, row_count = result
+            if success:
+                async with zip_cursor_lock:
+                    cursor_timestamp = _persist_zip_cursor(zip_code)
+                zip_tracker.record_success(zip_code, cursor_timestamp)
+            if browser_restart_interval:
+                async with restart_counter_lock:
+                    zips_since_restart += 1
+                    if zips_since_restart >= browser_restart_interval:
+                        LOGGER.info(
+                            "Restarting browser after %s ZIPs to avoid resource exhaustion",
+                            browser_restart_interval,
+                        )
+                        await _restart_browser("zip_interval")
+                        zips_since_restart = 0
+            return zip_code, items, alerts, success, row_count
 
             try:
                 pending_batch = list(zips)

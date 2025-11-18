@@ -452,6 +452,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const savings = store.price_was !== null && store.price_was !== undefined && store.price !== null && store.price !== undefined
       ? Math.max(store.price_was - store.price, 0)
       : null;
+    const savingsPct = store.price_was && store.price
+      ? Math.floor(Math.max(store.price_was - store.price, 0) / store.price_was * 100)
+      : null;
     const stockText = store.stock_estimate !== null && store.stock_estimate !== undefined
       ? `Stock: ${store.stock_estimate}`
       : (store.stock_label || '');
@@ -467,9 +470,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="store-pricing">
-          <div class="price">${store.price !== null && store.price !== undefined ? formatCurrency(store.price) : '<span class="muted">–</span>'}</div>
+          <div class="price">${store.price !== null && store.price !== undefined ? formatCurrency(store.price) : '<span class="muted">—</span>'}</div>
           ${store.price_was ? `<div class="was-price">Was ${formatCurrency(store.price_was)}</div>` : ''}
           ${savings ? `<div class="store-savings">Save ${formatCurrency(savings)}</div>` : ''}
+          ${savingsPct !== null ? `<div class="store-savings pct">${savingsPct}% off</div>` : ''}
           ${store.prev_price ? `<div class="prev-price">Prev ${formatCurrency(store.prev_price)}</div>` : ''}
         </div>
         <div class="store-meta">
@@ -525,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `${formatCurrency(group.min_price)}${group.max_price !== null && group.max_price !== undefined && group.max_price !== group.min_price ? ` – ${formatCurrency(group.max_price)}` : ''}`
       : 'Price unavailable';
     const regularPrice = group.min_price_was !== null && group.min_price_was !== undefined
-      ? formatRangeText(group.min_price_was, group.max_price_was, 'Regular')
+      ? formatRangeText(group.min_price_was, group.max_price_was, 'Was')
       : '';
     const priceSpread = group.price_spread !== null && group.price_spread !== undefined && group.price_spread > 0
       ? `Spread ${formatCurrency(group.price_spread)}`

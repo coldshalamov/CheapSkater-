@@ -262,6 +262,15 @@ def _format_stock_status(stock_estimate: int | None, availability: str | None) -
 
 def _prepare_listing(listing: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(listing)
+    store_number = _normalize_store_number(enriched.get("store_id") or enriched.get("store_number"))
+    canonical_store = _canonical_store_details(store_number)
+    if canonical_store:
+        enriched.setdefault("store_name", canonical_store.get("name"))
+        enriched.setdefault("store_city", canonical_store.get("city"))
+        enriched.setdefault("store_state", canonical_store.get("state"))
+        enriched.setdefault("store_zip", canonical_store.get("zip"))
+    if not enriched.get("store_state"):
+        enriched["store_state"] = _state_from_zip(enriched.get("store_zip"))
     enriched["store_label"] = _format_store_label(enriched)
     enriched["store_tooltip"] = _format_store_tooltip(enriched)
     enriched["store_product_url"] = _store_specific_url(
@@ -596,6 +605,36 @@ def _normalize_state(value: str | None) -> str | None:
         return None
     upper = value.upper()
     return upper if upper in {"WA", "OR"} else None
+
+
+def _listing_state(listing: dict[str, Any]) -> str | None:
+    """Best-effort state inference for a listing."""
+
+    direct = listing.get("store_state")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip().upper()
+
+    candidate_zip = listing.get("store_zip") or listing.get("zip")
+    inferred = _state_from_zip(candidate_zip)
+    if inferred:
+        return inferred
+
+    store_id = _normalize_store_number(listing.get("store_id"))
+    details = _canonical_store_details(store_id)
+    if details and details.get("state"):
+        return details["state"]
+    return None
+
+
+def _filter_by_state(listings: Iterable[dict[str, Any]], state: str | None) -> list[dict[str, Any]]:
+    if not state:
+        return list(listings)
+    target = state.upper()
+    return [
+        listing
+        for listing in listings
+        if _listing_state(listing) == target
+    ]
 
 
 def _state_from_zip(zip_code: str | None) -> str | None:
@@ -1143,9 +1182,10 @@ def _render_dashboard(
     LOGGER.debug(
         "Rendering dashboard", extra={"scope": scope, "state": state, "category": category}
     )
-    raw_items = _select_items(session, scope=scope, state=state, category=category)
+    raw_items = _select_items(session, scope=scope, state=None, category=category)
     prepared_items = _prepare_listings(raw_items)
-    items = _apply_filters(prepared_items, filters=filters)
+    state_filtered = _filter_by_state(prepared_items, state)
+    items = _apply_filters(state_filtered, filters=filters)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     serialized_groups = [_serialize_group(group) for group in grouped]
@@ -1347,10 +1387,11 @@ def export_excel(
         sort_order=sort_order,
     )
     raw_items = _select_items(
-        session, scope=scope, state=normalized_state, category=normalized_category
+        session, scope=scope, state=None, category=normalized_category
     )
     prepared_items = _prepare_listings(raw_items)
-    items = _apply_filters(prepared_items, filters=filters)
+    state_filtered = _filter_by_state(prepared_items, normalized_state)
+    items = _apply_filters(state_filtered, filters=filters)
 
     workbook = Workbook()
     sheet = workbook.active
@@ -1403,7 +1444,7 @@ def export_excel(
                 first_seen,
                 last_seen,
                 price_change,
-                _state_from_zip(item.get("store_zip")),
+                _listing_state(item),
                 item.get("store_zip"),
                 item.get("store_name"),
                 item.get("sku"),
@@ -1483,11 +1524,12 @@ def api_clearance(
     raw_items = _select_items(
         session,
         scope=scope,
-        state=normalized_state,
+        state=None,
         category=normalized_category,
     )
     prepared_items = _prepare_listings(raw_items)
-    items = _apply_filters(prepared_items, filters=filters)
+    state_filtered = _filter_by_state(prepared_items, normalized_state)
+    items = _apply_filters(state_filtered, filters=filters)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     payload = [_serialize_observation(item) for item in items]

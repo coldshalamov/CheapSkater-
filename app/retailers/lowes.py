@@ -33,6 +33,15 @@ GOTO_TIMEOUT_MS = 60000
 BACK_AISLE_PAGE_SIZE = 24
 MAX_BACK_AISLE_PAGES = 80
 MAX_EMPTY_PAGE_RESULTS = 1
+BACK_AISLE_DEPARTMENTS: dict[str, str] = {
+    "Flooring": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294934373",
+    "Hardware": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294934474",
+    "Building Supplies": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294934297",
+    "Lawn & Garden": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=1011552124422",
+    "Plumbing": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294935907",
+    "Lighting & Ceiling Fans": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294935637",
+    "Tools": "https://www.lowes.com/pl/The-back-aisle/2021454685607?refinement=2&catalog=4294936478",
+}
 
 
 def _resolve_user_agent() -> str | None:
@@ -631,15 +640,102 @@ async def set_store_context(
 def _prepare_category_url(url: str, store_id: str | None, *, offset: int = 0) -> str:
     parsed = urlparse(url)
     params = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    params.setdefault("pickupType", "pickupToday")
-    params.setdefault("availability", "pickupToday")
-    params["inStock"] = "1"
-    params.setdefault("rollUpVariants", "0")
-    if store_id and store_id.strip():
-        params.setdefault("storeNumber", store_id.strip())
+    # Default to minimal URLs to reduce fingerprinting/risk of blocks.
+    minimal = os.getenv("BACK_AISLE_MINIMAL_URL", "1") in {"1", "true", "True"}
+    if not minimal:
+        params.setdefault("pickupType", "pickupToday")
+        params.setdefault("availability", "pickupToday")
+        params["inStock"] = "1"
+        params.setdefault("rollUpVariants", "0")
+        if store_id and store_id.strip():
+            params.setdefault("storeNumber", store_id.strip())
     params["offset"] = str(max(offset, 0))
     rebuilt = parsed._replace(query=urlencode(params, doseq=True))
     return rebuilt.geturl()
+
+
+def _clean_department_name(name: str | None) -> str:
+    if not name:
+        return ""
+    cleaned = re.sub(r"\(\s*\d+\s*\)$", "", name)
+    return cleaned.strip(" \u2013\u2014-")
+
+
+def _is_back_aisle_category(name: str | None, url: str | None) -> bool:
+    lower_name = (name or "").lower()
+    lower_url = (url or "").lower()
+    return "back aisle" in lower_name or "the-back-aisle" in lower_url
+
+
+async def _warmup_home(page: Any) -> None:
+    """Open the Lowe's homepage once to establish cookies before deep-linking."""
+
+    if os.getenv("LOWES_WARMUP", "0") in {"0", "false", "False"}:
+        return
+    try:
+        await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+        await _safe_wait_for_load(page, "networkidle")
+        await human_wait(300, 600)
+    except Exception:
+        # Non-fatal; continue even if warmup fails.
+        return
+
+
+async def _discover_back_aisle_departments(
+    page: Any,
+    base_url: str,
+    *,
+    store_id: str | None,
+) -> list[dict[str, str]]:
+    """Return department-level Back Aisle URLs discovered from the sidebar."""
+
+    fallback: dict[str, str] = dict(BACK_AISLE_DEPARTMENTS)
+    # To avoid extra requests that can trip Akamai, let callers opt out of live discovery.
+    if os.getenv("BACK_AISLE_DISCOVERY", "0") not in {"1", "true", "True"}:
+        return [{"name": name, "url": url} for name, url in sorted(fallback.items()) if name and url]
+    target_url = _prepare_category_url(base_url, store_id, offset=0)
+    try:
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+        await _safe_wait_for_load(page, "networkidle")
+        await human_wait(180, 360)
+        try:
+            see_all = page.locator("button:has-text('See All'), a:has-text('See All')")
+            count = await see_all.count()
+        except Exception:
+            count = 0
+        for idx in range(count):
+            try:
+                await see_all.nth(idx).click(timeout=2500)
+                await human_wait(120, 240)
+            except Exception:
+                continue
+
+        try:
+            anchors = await page.eval_on_selector_all(
+                "a[href*='catalog=']",
+                """(els) => els.map((el) => ({
+                    href: el.href || '',
+                    text: (el.textContent || '').trim()
+                }))""",
+            )
+        except Exception:
+            anchors = []
+
+        discovered: dict[str, str] = {}
+        for anchor in anchors or []:
+            href = (anchor.get("href") or "").strip()
+            text = _clean_department_name(anchor.get("text"))
+            if not href or not text:
+                continue
+            if "the-back-aisle" not in href.lower():
+                continue
+            discovered[text] = href
+
+        merged = {**fallback, **discovered}
+        return [{"name": name, "url": url} for name, url in sorted(merged.items()) if name and url]
+    except Exception as exc:  # pragma: no cover - defensive discovery
+        LOGGER.warning("Back Aisle department discovery failed: %s", exc)
+        return [{"name": name, "url": url} for name, url in sorted(fallback.items()) if name and url]
 
 
 async def _wait_for_product_grid(page: Any) -> bool:
@@ -1187,6 +1283,8 @@ async def run_for_zip(
                             store_hint_entry.get("store_name"),
                             store_hint_entry.get("store_id"),
                         )
+                # Establish cookies before hitting deep Back Aisle links.
+                await _warmup_home(page)
                 store_id, store_name = await set_store_context(
                     page,
                     zip_code,
@@ -1195,7 +1293,28 @@ async def run_for_zip(
                 )
                 _ensure_page_active()
 
+                categories_to_scrape: list[dict[str, str]] = []
                 for category in categories:
+                    name = (category or {}).get("name")
+                    url = (category or {}).get("url")
+                    if not name or not url:
+                        continue
+                    if _is_back_aisle_category(name, url):
+                        # Legacy default: stick to a single Back Aisle URL to minimise requests.
+                        if os.getenv("BACK_AISLE_LEGACY", "1") in {"1", "true", "True"}:
+                            categories_to_scrape.append({"name": name, "url": url})
+                            continue
+                        discovered = await _discover_back_aisle_departments(
+                            page,
+                            url,
+                            store_id=store_id,
+                        )
+                        if discovered:
+                            categories_to_scrape.extend(discovered)
+                            continue
+                    categories_to_scrape.append({"name": name, "url": url})
+
+                for category in categories_to_scrape:
                     name = (category or {}).get("name")
                     url = (category or {}).get("url")
                     if not name or not url:

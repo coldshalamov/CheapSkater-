@@ -44,7 +44,8 @@ def _env_float(name: str, default: float) -> float:
 def headless_enabled() -> bool:
     """Return True if Playwright should run in headless mode."""
 
-    return _as_bool(os.getenv("CHEAPSKATER_HEADLESS"), True)
+    # Default to headful to better mimic a real browser.
+    return _as_bool(os.getenv("CHEAPSKATER_HEADLESS"), False)
 
 
 def selector_validation_skipped() -> bool:
@@ -98,8 +99,9 @@ def apply_stealth(playwright: Playwright) -> None:
 
 def _user_data_dir() -> Path | None:
     raw = os.getenv("CHEAPSKATER_USER_DATA_DIR")
+    # Default to a persistent profile to reuse cookies/fingerprint between runs.
     if not raw:
-        return None
+        raw = ".playwright-profile/chromium"
     path = Path(raw).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -148,7 +150,7 @@ def launch_kwargs() -> dict[str, Any]:
         "args": args,
     }
 
-    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL")
+    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL", "chromium")
     if channel:
         kwargs["channel"] = channel
 
