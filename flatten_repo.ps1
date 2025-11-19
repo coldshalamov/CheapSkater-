@@ -2,15 +2,13 @@ param(
     [string]$OutputPath = "flatten_repo.txt"
 )
 
-# Anchor output to the script directory when a relative path is provided
+# Always anchor to the script's directory
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $PSCommandPath }
-$outFile = if ([IO.Path]::IsPathRooted($OutputPath)) {
-    $OutputPath
-} else {
-    Join-Path $scriptRoot $OutputPath
-}
+Set-Location -LiteralPath $scriptRoot
 
-# Paths that should be skipped when flattening
+$outFile = if ([IO.Path]::IsPathRooted($OutputPath)) { $OutputPath } else { Join-Path $scriptRoot $OutputPath }
+
+# Paths/files that should be skipped when flattening
 $excludePrefixes = @(
     ".git",
     ".venv",
@@ -19,16 +17,20 @@ $excludePrefixes = @(
     "playwright-browsers",
     "logs",
     "outputs",
-    "node_modules"
+    "node_modules",
+    "dist",
+    "build"
 )
+$excludeExtensions = @(".exe", ".dll", ".pyd", ".so", ".bin", ".dat", ".jpg", ".jpeg", ".png", ".gif", ".zip", ".tar", ".gz", ".7z")
 
+Write-Host "Flattening repository from $scriptRoot to $outFile..."
 Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
 
-Get-ChildItem -Recurse -File |
+Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object {
         $rel = Resolve-Path -LiteralPath $_.FullName -Relative
-        # Skip excluded prefixes
-        -not ($excludePrefixes | ForEach-Object { $rel -like "$_`*" })
+        -not ($excludePrefixes | ForEach-Object { $rel -like "$_`*" }) -and
+        -not ($excludeExtensions | ForEach-Object { $rel.ToLower().EndsWith($_) })
     } |
     Sort-Object FullName |
     ForEach-Object {

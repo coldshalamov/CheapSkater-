@@ -6,8 +6,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0flatten_repo.ps1" %*
 
 if errorlevel 1 (
     echo Flattening failed. See output above for details.
+    pause
     exit /b 1
 )
 
 echo Flattening complete.
+pause
 exit /b 0
