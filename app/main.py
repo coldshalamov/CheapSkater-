@@ -805,6 +805,27 @@ def _probe_recent(ttl_minutes: float) -> bool:
     return (datetime.now(timezone.utc) - stamp) <= timedelta(minutes=ttl_minutes)
 
 
+def _reset_zip_cursor_file() -> None:
+    try:
+        ZIP_CURSOR_FILE.unlink(missing_ok=True)  # type: ignore[arg-type]
+        return
+    except AttributeError:
+        # Fallback for Python versions without missing_ok
+        pass
+    except FileNotFoundError:
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to reset zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+        return
+
+    try:
+        ZIP_CURSOR_FILE.unlink()
+    except FileNotFoundError:
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to reset zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+
+
 def _resolve_store_hints(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     retailers = config.get("retailers", {})
     lowes_conf = retailers.get("lowes", {})
@@ -1129,16 +1150,33 @@ async def _run_cycle(
                 apply_stealth(playwright)
                 browser, persistent_context = await launch_browser(playwright)
                 try:
+                    probe_attempts = 0
                     try:
-                        rows = await run_for_zip(
-                            playwright,
-                            target_zip,
-                            [target_category],
-                            clearance_threshold=pct_threshold,
-                            browser=browser,
-                            shared_context=persistent_context,
-                            store_hints=store_hints,
-                        )
+                        while True:
+                            try:
+                                rows = await run_for_zip(
+                                    playwright,
+                                    target_zip,
+                                    [target_category],
+                                    clearance_threshold=pct_threshold,
+                                    browser=browser,
+                                    shared_context=persistent_context,
+                                    store_hints=store_hints,
+                                )
+                                break
+                            except PlaywrightError as exc:
+                                probe_attempts += 1
+                                LOGGER.warning(
+                                    "Probe Playwright failure zip %s attempt %s/%s: %s",
+                                    target_zip,
+                                    probe_attempts,
+                                    max(1, BROWSER_RECOVERY_ATTEMPTS),
+                                    exc,
+                                )
+                                if probe_attempts > BROWSER_RECOVERY_ATTEMPTS:
+                                    raise
+                                await close_browser(browser, persistent_context)
+                                browser, persistent_context = await launch_browser(playwright)
                     except StoreContextError as exc:
                         LOGGER.error(
                             "Probe failed to set store context for zip=%s: %s",
@@ -1702,6 +1740,11 @@ async def _run_cycle(
             total_alerts,
             duration,
         )
+        if not dry_run and zips:
+            LOGGER.warning(
+                "No ZIPs completed successfully; resetting resume cursor for next cycle"
+            )
+            _reset_zip_cursor_file()
     return total_items, total_alerts
 
 
@@ -2253,12 +2296,29 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         dashboard_server, dashboard_thread = _start_dashboard_background()
         print("Dashboard running at http://localhost:8000")
 
-    try:
-        await _run_cycle(args, config, categories, session_factory, notifier, zip_tracker, metrics, data_tracker)
-    except Exception:
-        LOGGER.exception("Initial run cycle failed")
-        dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
-        raise
+    recovery_sleep = max(5, int(os.getenv("CHEAPSKATER_RECOVERY_SLEEP_SECONDS", "15")))
+    recovery_backoff = recovery_sleep
+    while True:
+        try:
+            await _run_cycle(
+                args,
+                config,
+                categories,
+                session_factory,
+                notifier,
+                zip_tracker,
+                metrics,
+                data_tracker,
+            )
+            break
+        except Exception:
+            LOGGER.exception(
+                "Run cycle failed; resetting cursor and retrying in %ss",
+                recovery_backoff,
+            )
+            _reset_zip_cursor_file()
+            await asyncio.sleep(recovery_backoff)
+            recovery_backoff = min(recovery_backoff * 2, 300)
 
     interval_minutes = config.get("schedule", {}).get("minutes", 180) or 180
     retention_value = config.get("quarantine_retention_days", 30)
@@ -2315,6 +2375,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
             raise
         except Exception:
             LOGGER.exception("Scheduled run cycle failed")
+            _reset_zip_cursor_file()
 
     scheduler.add_job(scheduled_cycle, "interval", minutes=interval_minutes)
     scheduler.start()

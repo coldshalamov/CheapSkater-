@@ -209,6 +209,41 @@ async def _safe_wait_for_load(page: Any, state: str) -> None:
         return
 
 
+async def _page_body_text(page: Any) -> str | None:
+    try:
+        locator = page.locator("body")
+        await locator.wait_for(timeout=1500)
+        content = await locator.inner_text()
+    except Exception:
+        return None
+    if not content:
+        return None
+    stripped = content.strip()
+    return stripped or None
+
+
+async def _ensure_not_blocked(
+    page: Any,
+    *,
+    zip_code: str | None,
+    url: str | None = None,
+    context: str = "request",
+) -> None:
+    text = await _page_body_text(page)
+    if not text:
+        return
+    lowered = text.lower()
+    trigger_tokens = (
+        "access denied",
+        "you don't have permission",
+        "edgesuite.net",
+        "reference #",
+    )
+    if any(token in lowered for token in trigger_tokens):
+        message = f"Access denied while {context}"
+        raise StoreContextError(message=message, zip_code=zip_code, url=url)
+
+
 async def _safe_click(locators: list[Any]) -> bool:
     for locator in locators:
         if locator is None:
@@ -454,6 +489,12 @@ async def set_store_context(
         raise StoreContextError(zip_code=zip_code) from exc
 
     await _safe_wait_for_load(page, "networkidle")
+    await _ensure_not_blocked(
+        page,
+        zip_code=zip_code,
+        url="https://www.lowes.com/",
+        context="setting store context",
+    )
     await human_wait(900, 1500)
     await _jitter_mouse(page)
 
@@ -667,7 +708,7 @@ def _is_back_aisle_category(name: str | None, url: str | None) -> bool:
     return "back aisle" in lower_name or "the-back-aisle" in lower_url
 
 
-async def _warmup_home(page: Any) -> None:
+async def _warmup_home(page: Any, zip_code: str | None = None) -> None:
     """Open the Lowe's homepage once to establish cookies before deep-linking."""
 
     if os.getenv("LOWES_WARMUP", "0") in {"0", "false", "False"}:
@@ -675,6 +716,12 @@ async def _warmup_home(page: Any) -> None:
     try:
         await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
         await _safe_wait_for_load(page, "networkidle")
+        await _ensure_not_blocked(
+            page,
+            zip_code=zip_code,
+            url=BASE_URL,
+            context="warming homepage",
+        )
         await human_wait(300, 600)
     except Exception:
         # Non-fatal; continue even if warmup fails.
@@ -686,6 +733,7 @@ async def _discover_back_aisle_departments(
     base_url: str,
     *,
     store_id: str | None,
+    zip_code: str,
 ) -> list[dict[str, str]]:
     """Return department-level Back Aisle URLs discovered from the sidebar."""
 
@@ -697,6 +745,12 @@ async def _discover_back_aisle_departments(
     try:
         await page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
         await _safe_wait_for_load(page, "networkidle")
+        await _ensure_not_blocked(
+            page,
+            zip_code=zip_code,
+            url=target_url,
+            context="discovering Back Aisle departments",
+        )
         await human_wait(180, 360)
         try:
             see_all = page.locator("button:has-text('See All'), a:has-text('See All')")
@@ -792,6 +846,12 @@ async def scrape_category(
             raise PageLoadError(url=target_url, zip_code=zip_code, category=category_name) from exc
 
         await _safe_wait_for_load(page, "networkidle")
+        await _ensure_not_blocked(
+            page,
+            zip_code=zip_code,
+            url=target_url,
+            context=f"loading category page offset={offset}",
+        )
         await _wait_for_product_grid(page)
         await human_wait(260, 540)
 
@@ -1284,7 +1344,7 @@ async def run_for_zip(
                             store_hint_entry.get("store_id"),
                         )
                 # Establish cookies before hitting deep Back Aisle links.
-                await _warmup_home(page)
+                await _warmup_home(page, zip_code)
                 store_id, store_name = await set_store_context(
                     page,
                     zip_code,
@@ -1308,6 +1368,7 @@ async def run_for_zip(
                             page,
                             url,
                             store_id=store_id,
+                            zip_code=zip_code,
                         )
                         if discovered:
                             categories_to_scrape.extend(discovered)

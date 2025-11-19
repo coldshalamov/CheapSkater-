@@ -2,16 +2,41 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
+import shutil
+import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
-from playwright.async_api import Browser, BrowserContext, Playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Error as PlaywrightError,
+    Playwright,
+)
+
+try:  # Defensive: TargetClosedError was added in later Playwright releases.
+    from playwright.async_api import TargetClosedError
+except Exception:  # pragma: no cover - fallback for future/beta releases
+    TargetClosedError = PlaywrightError  # type: ignore[assignment]
+
+LOGGER = logging.getLogger(__name__)
 
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_INSTALL_LOCK = Lock()
+_INSTALL_ATTEMPTED = False
+_PLAYWRIGHT_INSTALL_HINTS = (
+    "Executable doesn't exist at",
+    "Please run the following command to download new browsers",
+    "Looks like Playwright was just installed or updated",
+)
+_PERSISTENT_PROFILE_DISABLED = False
 
 
 def _as_bool(value: str | None, default: bool) -> bool:
@@ -97,7 +122,16 @@ def apply_stealth(playwright: Playwright) -> None:
         pass
 
 
+def _persistent_profiles_disabled() -> bool:
+    if _PERSISTENT_PROFILE_DISABLED:
+        return True
+    return _as_bool(os.getenv("CHEAPSKATER_DISABLE_PERSISTENT_PROFILE"), False)
+
+
 def _user_data_dir() -> Path | None:
+    if _persistent_profiles_disabled():
+        return None
+
     raw = os.getenv("CHEAPSKATER_USER_DATA_DIR")
     # Default to a persistent profile to reuse cookies/fingerprint between runs.
     if not raw:
@@ -168,17 +202,169 @@ def launch_kwargs() -> dict[str, Any]:
     return kwargs
 
 
+def _missing_browser_binary(exc: Exception) -> bool:
+    message = str(exc)
+    return any(hint in message for hint in _PLAYWRIGHT_INSTALL_HINTS)
+
+
+def _requires_browser_install(channel: str | None) -> str | None:
+    if not channel:
+        return "chromium"
+    normalized = channel.strip().lower()
+    if not normalized:
+        return "chromium"
+    if normalized == "chromium":
+        return "chromium"
+    return None
+
+
+def _ensure_playwright_browser_installed(channel: str | None) -> bool:
+    target = _requires_browser_install(channel)
+    if not target:
+        return False
+
+    global _INSTALL_ATTEMPTED
+    with _INSTALL_LOCK:
+        if _INSTALL_ATTEMPTED:
+            return False
+        _INSTALL_ATTEMPTED = True
+
+        cmd = [sys.executable, "-m", "playwright", "install", target]
+        display_cmd = " ".join(shlex.quote(part) for part in cmd)
+        LOGGER.warning(
+            "Playwright browser binary missing; executing %s", display_cmd
+        )
+        try:
+            subprocess.run(cmd, check=True)
+        except Exception as exc:
+            LOGGER.error(
+                "Automatic Playwright browser installation failed: %s", exc
+            )
+            return False
+
+    LOGGER.info("Playwright browser '%s' installed successfully", target)
+    return True
+
+
+def _disable_persistent_profile(reason: str) -> None:
+    global _PERSISTENT_PROFILE_DISABLED
+    if _PERSISTENT_PROFILE_DISABLED:
+        return
+    _PERSISTENT_PROFILE_DISABLED = True
+    LOGGER.warning(
+        "Disabling persistent Playwright profile for current process (%s)",
+        reason,
+    )
+
+
+def _reset_user_data_dir(path: Path) -> bool:
+    try:
+        if path.exists():
+            shutil.rmtree(path)
+    except Exception as exc:
+        LOGGER.error("Unable to remove Playwright profile %s: %s", path, exc)
+        return False
+
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        LOGGER.error("Unable to recreate Playwright profile %s: %s", path, exc)
+        return False
+
+    return True
+
+
+def _should_reset_profile(exc: Exception) -> bool:
+    message = str(exc)
+    if isinstance(exc, TargetClosedError):
+        return True
+    return any(
+        hint in message
+        for hint in (
+            "Target page, context or browser has been closed",
+            "browser has been closed",
+            "context has been closed",
+        )
+    )
+
+
 async def launch_browser(playwright: Playwright) -> tuple[Browser, BrowserContext | None]:
     """Launch Chromium according to env overrides. Returns (browser, persistent_context)."""
 
     user_dir = _user_data_dir()
     kwargs = launch_kwargs()
+    return await _launch_with_retry(playwright, user_dir, kwargs)
+
+
+async def _perform_launch(
+    playwright: Playwright, user_dir: Path | None, kwargs: dict[str, Any]
+) -> tuple[Browser, BrowserContext | None]:
     if user_dir is not None:
-        context = await playwright.chromium.launch_persistent_context(str(user_dir), **kwargs)
+        context = await playwright.chromium.launch_persistent_context(
+            str(user_dir), **kwargs
+        )
         return context.browser, context
 
     browser = await playwright.chromium.launch(**kwargs)
     return browser, None
+
+
+async def _launch_with_retry(
+    playwright: Playwright,
+    user_dir: Path | None,
+    kwargs: dict[str, Any],
+    *,
+    allow_install_retry: bool = True,
+    allow_profile_reset: bool = True,
+    allow_ephemeral_fallback: bool = True,
+) -> tuple[Browser, BrowserContext | None]:
+    try:
+        return await _perform_launch(playwright, user_dir, kwargs)
+    except Exception as exc:
+        if allow_install_retry and _missing_browser_binary(exc):
+            if _ensure_playwright_browser_installed(kwargs.get("channel")):
+                LOGGER.info(
+                    "Retrying Playwright launch after installing browsers"
+                )
+                return await _launch_with_retry(
+                    playwright,
+                    user_dir,
+                    kwargs,
+                    allow_install_retry=False,
+                    allow_profile_reset=allow_profile_reset,
+                    allow_ephemeral_fallback=allow_ephemeral_fallback,
+                )
+
+        if user_dir is not None and allow_profile_reset and _should_reset_profile(exc):
+            if _reset_user_data_dir(user_dir):
+                LOGGER.warning(
+                    "Playwright persistent profile at %s reset after crash",
+                    user_dir,
+                )
+                return await _launch_with_retry(
+                    playwright,
+                    user_dir,
+                    kwargs,
+                    allow_install_retry=False,
+                    allow_profile_reset=False,
+                    allow_ephemeral_fallback=allow_ephemeral_fallback,
+                )
+
+        if user_dir is not None and allow_ephemeral_fallback:
+            _disable_persistent_profile(str(exc))
+            LOGGER.warning(
+                "Falling back to non-persistent Chromium profile after launch failure"
+            )
+            return await _launch_with_retry(
+                playwright,
+                None,
+                kwargs,
+                allow_install_retry=False,
+                allow_profile_reset=False,
+                allow_ephemeral_fallback=False,
+            )
+
+        raise
 
 
 async def close_browser(browser: Browser | None, context: BrowserContext | None) -> None:

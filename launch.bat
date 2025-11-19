@@ -45,14 +45,15 @@ REM --- Disable selector preflight sanity-check ---
 set "CHEAPSKATER_SKIP_PREFLIGHT=1"
 set "CHEAPSKATER_HEADLESS=0"
 set "CHEAPSKATER_STEALTH=1"
-set "CHEAPSKATER_WAIT_MULTIPLIER=0.85"
-set "CHEAPSKATER_CATEGORY_DELAY_MIN_MS=900"
-set "CHEAPSKATER_CATEGORY_DELAY_MAX_MS=1900"
-set "CHEAPSKATER_ZIP_DELAY_MIN_MS=3000"
-set "CHEAPSKATER_ZIP_DELAY_MAX_MS=7000"
+set "CHEAPSKATER_WAIT_MULTIPLIER=1.15"
+set "CHEAPSKATER_CATEGORY_DELAY_MIN_MS=1800"
+set "CHEAPSKATER_CATEGORY_DELAY_MAX_MS=4200"
+set "CHEAPSKATER_ZIP_DELAY_MIN_MS=6000"
+set "CHEAPSKATER_ZIP_DELAY_MAX_MS=14000"
 set "CHEAPSKATER_MOUSE_JITTER=1"
-set "CHEAPSKATER_SLOW_MO_MS=12"
+set "CHEAPSKATER_SLOW_MO_MS=16"
 set "LOG_LEVEL=INFO"
+set "SCRAPER_ARGS=--concurrency 1"
 
 REM --- Optional ZIP override ---
 set "EXTRA_ARGS="
@@ -68,16 +69,18 @@ timeout /t 3 >nul
 start "" "http://localhost:8000" >nul 2>&1
 
 echo Running probe %EXTRA_ARGS%...
-python -m app.main --probe --probe-cache-minutes 60 %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
-if errorlevel 1 (
-    echo Probe failed! Check %LOG_FILE%
-    pause
-    exit /b 1
+python -m app.main --probe --probe-cache-minutes 60 %SCRAPER_ARGS% %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
+set "PROBE_EXIT=%ERRORLEVEL%"
+if not "%PROBE_EXIT%"=="0" (
+    echo Probe failed (exit %PROBE_EXIT%). See %LOG_FILE% for details.
+    echo Continuing without a successful probe run...
+) else (
+    echo Probe succeeded.
 )
 
 REM --- Start long-running scraper (Ctrl+C to stop) ---
 echo Launching scraper (Ctrl+C to stop)...
-python -m app.main %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
+python -m app.main %SCRAPER_ARGS% %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo Scraper run failed! Check %LOG_FILE%
     pause
