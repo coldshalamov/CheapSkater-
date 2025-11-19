@@ -64,16 +64,6 @@ start "CheapSkater Dashboard" cmd /c ""%CD%\.venv\Scripts\python.exe" -m uvicorn
 timeout /t 3 >nul
 start "" "http://localhost:8000" >nul 2>&1
 
-REM --- Probe (no cache) ---
-echo Running probe %EXTRA_ARGS% (no cache)...
-python -m app.main --probe --probe-cache-minutes 0 %SCRAPER_ARGS% %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
-set "PROBE_EXIT=%ERRORLEVEL%"
-if not "%PROBE_EXIT%"=="0" (
-    echo Probe failed (exit %PROBE_EXIT%). See %LOG_FILE% for details; continuing...
-) else (
-    echo Probe succeeded.
-)
-
 REM --- Scraper (loop forever) ---
 echo Launching scraper (Ctrl+C to stop)...
 python -m app.main %SCRAPER_ARGS% %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1

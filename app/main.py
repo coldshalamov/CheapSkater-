@@ -744,20 +744,57 @@ def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]
 def _load_zip_resume(zips: list[str]) -> tuple[list[str], str | None]:
     if not ZIP_RESUME_ENABLED:
         return zips, None
+
+    def _parse_timestamp(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except Exception:
+            return None
+
+    candidates: list[tuple[str, str, datetime]] = []
     try:
-        data = json.loads(ZIP_CURSOR_FILE.read_text(encoding="utf-8"))
+        cursor_payload = json.loads(ZIP_CURSOR_FILE.read_text(encoding="utf-8"))
+        cursor_zip = (cursor_payload.get("last_zip") or "").strip()
+        cursor_ts = _parse_timestamp(cursor_payload.get("timestamp"))
+        if cursor_zip and cursor_zip in zips:
+            candidates.append(
+                ("cursor", cursor_zip, cursor_ts or datetime.min.replace(tzinfo=timezone.utc))
+            )
     except FileNotFoundError:
-        return zips, None
+        pass
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("Unable to read zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
+
+    try:
+        history_payload = json.loads(ZIP_HISTORY_FILE.read_text(encoding="utf-8"))
+        if isinstance(history_payload, dict):
+            for zip_code, ts_value in history_payload.items():
+                if zip_code not in zips:
+                    continue
+                stamp = _parse_timestamp(str(ts_value))
+                if stamp:
+                    candidates.append(("history", zip_code, stamp))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Unable to read zip history file %s: %s", ZIP_HISTORY_FILE, exc)
+
+    if not candidates:
         return zips, None
-    last_zip = data.get("last_zip")
-    if not last_zip or last_zip not in zips:
+
+    source, last_zip, _ = max(candidates, key=lambda entry: entry[2])
+    if last_zip not in zips:
         return zips, None
+
     idx = zips.index(last_zip)
     if idx == len(zips) - 1:
+        LOGGER.info("Resuming ZIP queue after %s (source=%s); starting from beginning", last_zip, source)
         return zips, last_zip
+
     rotated = zips[idx + 1 :] + zips[: idx + 1]
+    LOGGER.info("Resuming ZIP queue after %s (source=%s); next=%s", last_zip, source, rotated[0])
     return rotated, last_zip
 
 
