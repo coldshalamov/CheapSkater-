@@ -1740,11 +1740,6 @@ async def _run_cycle(
             total_alerts,
             duration,
         )
-        if not dry_run and zips:
-            LOGGER.warning(
-                "No ZIPs completed successfully; resetting resume cursor for next cycle"
-            )
-            _reset_zip_cursor_file()
     return total_items, total_alerts
 
 
@@ -2313,10 +2308,9 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
             break
         except Exception:
             LOGGER.exception(
-                "Run cycle failed; resetting cursor and retrying in %ss",
+                "Run cycle failed; retrying in %ss",
                 recovery_backoff,
             )
-            _reset_zip_cursor_file()
             await asyncio.sleep(recovery_backoff)
             recovery_backoff = min(recovery_backoff * 2, 300)
 
@@ -2375,7 +2369,6 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
             raise
         except Exception:
             LOGGER.exception("Scheduled run cycle failed")
-            _reset_zip_cursor_file()
 
     scheduler.add_job(scheduled_cycle, "interval", minutes=interval_minutes)
     scheduler.start()
