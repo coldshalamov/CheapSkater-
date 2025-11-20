@@ -29,8 +29,9 @@ Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
 Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object {
         $rel = Resolve-Path -LiteralPath $_.FullName -Relative
-        -not ($excludePrefixes | ForEach-Object { $rel -like "$_`*" }) -and
-        -not ($excludeExtensions | ForEach-Object { $rel.ToLower().EndsWith($_) })
+        $prefixHit = ($excludePrefixes | Where-Object { $rel -like "$_`*" }).Count -gt 0
+        $extensionHit = ($excludeExtensions | Where-Object { $rel.ToLower().EndsWith($_) }).Count -gt 0
+        -not $prefixHit -and -not $extensionHit
     } |
     Sort-Object FullName |
     ForEach-Object {
