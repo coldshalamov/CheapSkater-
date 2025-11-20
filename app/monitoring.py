@@ -97,15 +97,34 @@ class ZipProgressTracker:
     cursor_path: Path
     history_path: Path
     watchdog_minutes: float = 0.0
+    attempts_path: Path = Path("logs/zip_attempts.json")
     _history: dict[str, str] = field(default_factory=dict, init=False)
+    _attempts: dict[str, int] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self._history = _read_json(self.history_path) or {}
+        raw_attempts = _read_json(self.attempts_path) or {}
+        if isinstance(raw_attempts, dict):
+            self._attempts = {str(k): int(v) for k, v in raw_attempts.items()}
+        else:
+            self._attempts = {}
 
     def record_success(self, zip_code: str, timestamp: datetime) -> None:
         self._history[zip_code] = timestamp.isoformat()
         try:
             _write_json(self.history_path, self._history)
+        except Exception:
+            pass
+
+    def mark_attempt(self, zip_code: str) -> None:
+        """Record an attempt for zip_code immediately."""
+
+        if not zip_code:
+            return
+        current = int(self._attempts.get(zip_code, 0))
+        self._attempts[zip_code] = current + 1
+        try:
+            _write_json(self.attempts_path, self._attempts)
         except Exception:
             pass
 
@@ -123,7 +142,7 @@ class ZipProgressTracker:
         def _sort_key(zip_code: str) -> tuple[int, float]:
             ts = history.get(zip_code)
             age = ts.timestamp() if ts else 0.0
-            return (0 if ts else 1, age)
+            return (0 if ts is None else 1, age)
 
         wa = sorted([z for z in zips if state_resolver(z) == "WA"], key=_sort_key)
         or_zips = sorted([z for z in zips if state_resolver(z) == "OR"], key=_sort_key)
@@ -165,6 +184,17 @@ class ZipProgressTracker:
             return True, float("inf")
         delta = (_now() - last).total_seconds() / 60.0
         return delta >= self.watchdog_minutes, delta
+
+    def filter_poison(self, zips: list[str]) -> list[str]:
+        """Filter out ZIPs with >3 failed attempts that have never succeeded."""
+
+        filtered: list[str] = []
+        for zip_code in zips:
+            attempts = int(self._attempts.get(zip_code, 0))
+            if attempts > 3 and zip_code not in self._history:
+                continue
+            filtered.append(zip_code)
+        return filtered
 
 
 @dataclass

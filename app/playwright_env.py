@@ -82,7 +82,7 @@ def selector_validation_skipped() -> bool:
 def stealth_enabled() -> bool:
     """Return True when stealth evasion scripts should be applied."""
 
-    return _as_bool(os.getenv("CHEAPSKATER_STEALTH"), True)
+    return _as_bool(os.getenv("CHEAPSKATER_STEALTH"), False)
 
 
 @lru_cache(maxsize=1)
@@ -125,7 +125,8 @@ def apply_stealth(playwright: Playwright) -> None:
 def _persistent_profiles_disabled() -> bool:
     if _PERSISTENT_PROFILE_DISABLED:
         return True
-    return _as_bool(os.getenv("CHEAPSKATER_DISABLE_PERSISTENT_PROFILE"), False)
+    # Default to disabling persistent profiles to avoid lock/corruption issues.
+    return _as_bool(os.getenv("CHEAPSKATER_DISABLE_PERSISTENT_PROFILE"), True)
 
 
 def _user_data_dir() -> Path | None:
@@ -139,6 +140,20 @@ def _user_data_dir() -> Path | None:
     path = Path(raw).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _clear_singleton_lock(user_dir: Path | None) -> None:
+    """Remove Chromium's stale SingletonLock to avoid startup hangs."""
+
+    if user_dir is None:
+        return
+    lock_file = user_dir / "SingletonLock"
+    try:
+        if lock_file.exists():
+            lock_file.unlink()
+            LOGGER.warning("Removed stale SingletonLock at %s", lock_file)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Failed to remove SingletonLock at %s: %s", lock_file, exc)
 
 
 def persistent_profile_enabled() -> bool:
@@ -165,6 +180,18 @@ def slow_mo_ms() -> int | None:
 def launch_kwargs() -> dict[str, Any]:
     """Return kwargs passed to chromium.launch / launch_persistent_context."""
 
+    if _as_bool(os.getenv("CHEAPSKATER_MINIMAL_LAUNCH"), True):
+        # Minimal settings to maximise launch reliability.
+        return {
+            "headless": headless_enabled(),
+            # Keep args simple but deterministic; add start-maximized to ensure visibility.
+            "args": [
+                "--start-maximized",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+            ],
+        }
+
     args = [
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
@@ -184,7 +211,7 @@ def launch_kwargs() -> dict[str, Any]:
         "args": args,
     }
 
-    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL", "chromium")
+    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL")
     if channel:
         kwargs["channel"] = channel
 
@@ -299,6 +326,14 @@ async def launch_browser(playwright: Playwright) -> tuple[Browser, BrowserContex
 async def _perform_launch(
     playwright: Playwright, user_dir: Path | None, kwargs: dict[str, Any]
 ) -> tuple[Browser, BrowserContext | None]:
+    _clear_singleton_lock(user_dir)
+    LOGGER.error(  # force visibility
+        "Launching Chromium | headless=%s | user_dir=%s | channel=%s | args=%s",
+        kwargs.get("headless"),
+        user_dir,
+        kwargs.get("channel"),
+        kwargs.get("args"),
+    )
     if user_dir is not None:
         context = await playwright.chromium.launch_persistent_context(
             str(user_dir), **kwargs
@@ -317,10 +352,17 @@ async def _launch_with_retry(
     allow_install_retry: bool = True,
     allow_profile_reset: bool = True,
     allow_ephemeral_fallback: bool = True,
+    allow_minimal_fallback: bool = True,
 ) -> tuple[Browser, BrowserContext | None]:
     try:
         return await _perform_launch(playwright, user_dir, kwargs)
     except Exception as exc:
+        LOGGER.error(
+            "Playwright launch attempt failed | user_dir=%s | kwargs=%s | error=%s",
+            user_dir,
+            kwargs,
+            exc,
+        )
         if allow_install_retry and _missing_browser_binary(exc):
             if _ensure_playwright_browser_installed(kwargs.get("channel")):
                 LOGGER.info(
@@ -333,6 +375,7 @@ async def _launch_with_retry(
                     allow_install_retry=False,
                     allow_profile_reset=allow_profile_reset,
                     allow_ephemeral_fallback=allow_ephemeral_fallback,
+                    allow_minimal_fallback=allow_minimal_fallback,
                 )
 
         if user_dir is not None and allow_profile_reset and _should_reset_profile(exc):
@@ -348,6 +391,7 @@ async def _launch_with_retry(
                     allow_install_retry=False,
                     allow_profile_reset=False,
                     allow_ephemeral_fallback=allow_ephemeral_fallback,
+                    allow_minimal_fallback=allow_minimal_fallback,
                 )
 
         if user_dir is not None and allow_ephemeral_fallback:
@@ -362,7 +406,26 @@ async def _launch_with_retry(
                 allow_install_retry=False,
                 allow_profile_reset=False,
                 allow_ephemeral_fallback=False,
+                allow_minimal_fallback=allow_minimal_fallback,
             )
+
+        if allow_minimal_fallback:
+            LOGGER.warning(
+                "Playwright launch failed with configured kwargs; retrying with minimal defaults (headless, no channel, no args)"
+            )
+            minimal_kwargs = {"headless": True}
+            try:
+                return await _launch_with_retry(
+                    playwright,
+                    None,
+                    minimal_kwargs,
+                    allow_install_retry=False,
+                    allow_profile_reset=False,
+                    allow_ephemeral_fallback=False,
+                    allow_minimal_fallback=False,
+                )
+            except Exception as inner_exc:
+                LOGGER.error("Minimal Playwright launch fallback failed: %s", inner_exc)
 
         raise
 

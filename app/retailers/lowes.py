@@ -24,6 +24,9 @@ from app.playwright_env import (
     category_delay_bounds,
     headless_enabled,
     mouse_jitter_enabled,
+    launch_kwargs as shared_launch_kwargs,
+    _user_data_dir as shared_user_data_dir,
+    _clear_singleton_lock as clear_lockfile,
 )
 from app.playwright_env import headless_enabled
 
@@ -1279,7 +1282,8 @@ async def run_for_zip(
         try:
             if owns_browser:
                 active_browser = await active_playwright.chromium.launch(
-                    headless=headless_enabled()
+                    headless=headless_enabled(),
+                    args=["--start-maximized"],
                 )
 
             assert active_browser is not None

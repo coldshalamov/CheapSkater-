@@ -47,6 +47,7 @@ from app.storage.db import check_quarantine_table, get_engine, init_db_safe, mak
 from app.storage.models_sql import Alert, Observation
 import app.selectors as selectors
 from app.playwright_env import (
+    _disable_persistent_profile,
     apply_stealth,
     close_browser,
     launch_browser,
@@ -63,6 +64,15 @@ from app.snapshots import load_snapshot, store_snapshot
 
 
 LOGGER = get_logger(__name__)
+
+
+def _disable_profile_safe(reason: str) -> None:
+    """Best-effort wrapper to disable the persistent Playwright profile."""
+
+    try:
+        _disable_persistent_profile(reason)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("Failed to disable persistent profile: %s", exc)
 
 
 class PreflightError(RuntimeError):
@@ -1045,6 +1055,7 @@ async def _run_cycle(
 
     zips = _resolve_zips(args, config)
     zips = zip_tracker.interleave(zips, _infer_state_from_zip)
+    zips = zip_tracker.filter_poison(zips)
     resume_enabled = (
         ZIP_RESUME_ENABLED
         and not dry_run
@@ -1369,7 +1380,24 @@ async def _run_cycle(
                     LOGGER.warning("Restarting Playwright browser (%s)", reason)
                     await close_browser(browser, persistent_context)
                     health_monitor.record_browser_restart(reason=reason)
-                    browser, persistent_context = await launch_browser(playwright)
+                    try:
+                        browser, persistent_context = await launch_browser(playwright)
+                        return
+                    except Exception as exc:
+                        LOGGER.error(
+                            "Browser restart failed (%s); disabling persistent profile and retrying",
+                            exc,
+                        )
+                        try:
+                            _disable_profile_safe(str(exc))
+                            browser, persistent_context = await launch_browser(playwright)
+                            return
+                        except Exception as exc2:
+                            LOGGER.error(
+                                "Browser restart second attempt failed: %s",
+                                exc2,
+                            )
+                            raise
 
             async def _scrape_zip_with_recovery(
                 zip_code: str,
@@ -1667,6 +1695,7 @@ async def _run_cycle(
 
         async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
             nonlocal zips_since_restart
+            zip_tracker.mark_attempt(zip_code)
             await semaphore.acquire()
             try:
                 result = await asyncio.wait_for(
@@ -1708,30 +1737,28 @@ async def _run_cycle(
                         zips_since_restart = 0
             return zip_code, items, alerts, success, row_count
 
-            try:
-                pending_batch = list(zips)
-                while pending_batch:
-                    results = await asyncio.gather(
-                        *(_process_zip_with_cursor(zip_code) for zip_code in pending_batch)
-                    )
-                    for result in results:
-                        zip_code, items, alerts, success, row_count = result
-                        total_items += items
-                        total_alerts += alerts
-                        any_zip_success = any_zip_success or success
-                        if not dry_run:
-                            data_tracker.record(zip_code, row_count)
-                    async with store_context_lock:
-                        pending_batch = list(store_context_retry_candidates)
+        try:
+            pending_batch = list(zips)
+            while pending_batch:
+                zip_code = pending_batch.pop(0)
+                zip_code, items, alerts, success, row_count = await _process_zip_with_cursor(zip_code)
+                total_items += items
+                total_alerts += alerts
+                any_zip_success = any_zip_success or success
+                if not dry_run:
+                    data_tracker.record(zip_code, row_count)
+                async with store_context_lock:
+                    if store_context_retry_candidates:
+                        pending_batch.extend(sorted(store_context_retry_candidates))
                         store_context_retry_candidates.clear()
-                if store_context_skipped:
-                    LOGGER.warning(
-                        "Skipped %d ZIPs after repeated store-context failures: %s",
-                        len(store_context_skipped),
-                        ", ".join(sorted(store_context_skipped)),
-                    )
-            finally:
-                await close_browser(browser, persistent_context)
+            if store_context_skipped:
+                LOGGER.warning(
+                    "Skipped %d ZIPs after repeated store-context failures: %s",
+                    len(store_context_skipped),
+                    ", ".join(sorted(store_context_skipped)),
+                )
+        finally:
+            await close_browser(browser, persistent_context)
     finally:
         memory_watchdog.stop()
         duration = time.monotonic() - start
@@ -2310,7 +2337,9 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         return
 
     notifier = Notifier()
-    zip_tracker = ZipProgressTracker(ZIP_CURSOR_FILE, ZIP_HISTORY_FILE, ZIP_WATCHDOG_MINUTES)
+    zip_tracker = ZipProgressTracker(
+        ZIP_CURSOR_FILE, ZIP_HISTORY_FILE, ZIP_WATCHDOG_MINUTES, attempts_path=ZIP_ATTEMPTS_FILE
+    )
     metrics = MetricsEmitter(
         METRICS_LOG_FILE,
         METRICS_SUMMARY_FILE,
@@ -2432,6 +2461,7 @@ def main() -> None:
 
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
 ZIP_HISTORY_FILE = Path(os.getenv("CHEAPSKATER_ZIP_HISTORY", "logs/zip_history.json"))
+ZIP_ATTEMPTS_FILE = Path(os.getenv("CHEAPSKATER_ZIP_ATTEMPTS", "logs/zip_attempts.json"))
 ZIP_RESUME_ENABLED = os.getenv("CHEAPSKATER_RESUME_ZIPS", "1") not in {"0", "false", "False"}
 ZIP_PROGRESS_TIMEOUT_MINUTES = float(os.getenv("CHEAPSKATER_ZIP_TIMEOUT_MINUTES", "45"))
 BROWSER_ZIP_RESTART_LIMIT = max(0, int(os.getenv("CHEAPSKATER_BROWSER_ZIP_LIMIT", "10")))
