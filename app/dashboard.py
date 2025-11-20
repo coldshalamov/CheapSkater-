@@ -256,8 +256,7 @@ def _format_stock_status(stock_estimate: int | None, availability: str | None) -
         return None
     if stock_estimate == 0:
         return "0 in stock"
-    units = "unit" if stock_estimate == 1 else "units"
-    return f"{stock_estimate} {units} available"
+    return f"{stock_estimate} in stock"
 
 
 def _prepare_listing(listing: dict[str, Any]) -> dict[str, Any]:
@@ -1573,4 +1572,3 @@ if __name__ == "__main__":
 
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run("app.dashboard:app", host="0.0.0.0", port=port, reload=False)
-

@@ -1,9 +1,6 @@
 # Virtual environments
 /.venv/
 .playwright-profile/
-.playwright-browsers/
-playwright-browsers/
-flatten_repo.txt
 
 # Python cache directories
 __pycache__/
@@ -17,8 +14,6 @@ __pycache__/
 /logs/*
 !/logs/.gitkeep
 /outputs/*
-!/outputs/*.csv
-!/outputs/*.sqlite
 !/outputs/.gitkeep
 
 # Environment and system files

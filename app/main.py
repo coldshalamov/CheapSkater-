@@ -47,7 +47,6 @@ from app.storage.db import check_quarantine_table, get_engine, init_db_safe, mak
 from app.storage.models_sql import Alert, Observation
 import app.selectors as selectors
 from app.playwright_env import (
-    _disable_persistent_profile,
     apply_stealth,
     close_browser,
     launch_browser,
@@ -64,15 +63,6 @@ from app.snapshots import load_snapshot, store_snapshot
 
 
 LOGGER = get_logger(__name__)
-
-
-def _disable_profile_safe(reason: str) -> None:
-    """Best-effort wrapper to disable the persistent Playwright profile."""
-
-    try:
-        _disable_persistent_profile(reason)
-    except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.warning("Failed to disable persistent profile: %s", exc)
 
 
 class PreflightError(RuntimeError):
@@ -754,57 +744,20 @@ def _resolve_zips(args: argparse.Namespace, config: dict[str, Any]) -> list[str]
 def _load_zip_resume(zips: list[str]) -> tuple[list[str], str | None]:
     if not ZIP_RESUME_ENABLED:
         return zips, None
-
-    def _parse_timestamp(value: str | None) -> datetime | None:
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(value)
-        except Exception:
-            return None
-
-    candidates: list[tuple[str, str, datetime]] = []
     try:
-        cursor_payload = json.loads(ZIP_CURSOR_FILE.read_text(encoding="utf-8"))
-        cursor_zip = (cursor_payload.get("last_zip") or "").strip()
-        cursor_ts = _parse_timestamp(cursor_payload.get("timestamp"))
-        if cursor_zip and cursor_zip in zips:
-            candidates.append(
-                ("cursor", cursor_zip, cursor_ts or datetime.min.replace(tzinfo=timezone.utc))
-            )
+        data = json.loads(ZIP_CURSOR_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        pass
+        return zips, None
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("Unable to read zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
-
-    try:
-        history_payload = json.loads(ZIP_HISTORY_FILE.read_text(encoding="utf-8"))
-        if isinstance(history_payload, dict):
-            for zip_code, ts_value in history_payload.items():
-                if zip_code not in zips:
-                    continue
-                stamp = _parse_timestamp(str(ts_value))
-                if stamp:
-                    candidates.append(("history", zip_code, stamp))
-    except FileNotFoundError:
-        pass
-    except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.warning("Unable to read zip history file %s: %s", ZIP_HISTORY_FILE, exc)
-
-    if not candidates:
         return zips, None
-
-    source, last_zip, _ = max(candidates, key=lambda entry: entry[2])
-    if last_zip not in zips:
+    last_zip = data.get("last_zip")
+    if not last_zip or last_zip not in zips:
         return zips, None
-
     idx = zips.index(last_zip)
     if idx == len(zips) - 1:
-        LOGGER.info("Resuming ZIP queue after %s (source=%s); starting from beginning", last_zip, source)
         return zips, last_zip
-
     rotated = zips[idx + 1 :] + zips[: idx + 1]
-    LOGGER.info("Resuming ZIP queue after %s (source=%s); next=%s", last_zip, source, rotated[0])
     return rotated, last_zip
 
 
@@ -850,27 +803,6 @@ def _probe_recent(ttl_minutes: float) -> bool:
     except Exception:
         return False
     return (datetime.now(timezone.utc) - stamp) <= timedelta(minutes=ttl_minutes)
-
-
-def _reset_zip_cursor_file() -> None:
-    try:
-        ZIP_CURSOR_FILE.unlink(missing_ok=True)  # type: ignore[arg-type]
-        return
-    except AttributeError:
-        # Fallback for Python versions without missing_ok
-        pass
-    except FileNotFoundError:
-        return
-    except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.warning("Unable to reset zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
-        return
-
-    try:
-        ZIP_CURSOR_FILE.unlink()
-    except FileNotFoundError:
-        return
-    except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.warning("Unable to reset zip cursor file %s: %s", ZIP_CURSOR_FILE, exc)
 
 
 def _resolve_store_hints(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
@@ -1055,7 +987,6 @@ async def _run_cycle(
 
     zips = _resolve_zips(args, config)
     zips = zip_tracker.interleave(zips, _infer_state_from_zip)
-    zips = zip_tracker.filter_poison(zips)
     resume_enabled = (
         ZIP_RESUME_ENABLED
         and not dry_run
@@ -1198,33 +1129,16 @@ async def _run_cycle(
                 apply_stealth(playwright)
                 browser, persistent_context = await launch_browser(playwright)
                 try:
-                    probe_attempts = 0
                     try:
-                        while True:
-                            try:
-                                rows = await run_for_zip(
-                                    playwright,
-                                    target_zip,
-                                    [target_category],
-                                    clearance_threshold=pct_threshold,
-                                    browser=browser,
-                                    shared_context=persistent_context,
-                                    store_hints=store_hints,
-                                )
-                                break
-                            except PlaywrightError as exc:
-                                probe_attempts += 1
-                                LOGGER.warning(
-                                    "Probe Playwright failure zip %s attempt %s/%s: %s",
-                                    target_zip,
-                                    probe_attempts,
-                                    max(1, BROWSER_RECOVERY_ATTEMPTS),
-                                    exc,
-                                )
-                                if probe_attempts > BROWSER_RECOVERY_ATTEMPTS:
-                                    raise
-                                await close_browser(browser, persistent_context)
-                                browser, persistent_context = await launch_browser(playwright)
+                        rows = await run_for_zip(
+                            playwright,
+                            target_zip,
+                            [target_category],
+                            clearance_threshold=pct_threshold,
+                            browser=browser,
+                            shared_context=persistent_context,
+                            store_hints=store_hints,
+                        )
                     except StoreContextError as exc:
                         LOGGER.error(
                             "Probe failed to set store context for zip=%s: %s",
@@ -1380,24 +1294,7 @@ async def _run_cycle(
                     LOGGER.warning("Restarting Playwright browser (%s)", reason)
                     await close_browser(browser, persistent_context)
                     health_monitor.record_browser_restart(reason=reason)
-                    try:
-                        browser, persistent_context = await launch_browser(playwright)
-                        return
-                    except Exception as exc:
-                        LOGGER.error(
-                            "Browser restart failed (%s); disabling persistent profile and retrying",
-                            exc,
-                        )
-                        try:
-                            _disable_profile_safe(str(exc))
-                            browser, persistent_context = await launch_browser(playwright)
-                            return
-                        except Exception as exc2:
-                            LOGGER.error(
-                                "Browser restart second attempt failed: %s",
-                                exc2,
-                            )
-                            raise
+                    browser, persistent_context = await launch_browser(playwright)
 
             async def _scrape_zip_with_recovery(
                 zip_code: str,
@@ -1695,7 +1592,6 @@ async def _run_cycle(
 
         async def _process_zip_with_cursor(zip_code: str) -> tuple[str, int, int, bool, int]:
             nonlocal zips_since_restart
-            zip_tracker.mark_attempt(zip_code)
             await semaphore.acquire()
             try:
                 result = await asyncio.wait_for(
@@ -1737,28 +1633,30 @@ async def _run_cycle(
                         zips_since_restart = 0
             return zip_code, items, alerts, success, row_count
 
-        try:
-            pending_batch = list(zips)
-            while pending_batch:
-                zip_code = pending_batch.pop(0)
-                zip_code, items, alerts, success, row_count = await _process_zip_with_cursor(zip_code)
-                total_items += items
-                total_alerts += alerts
-                any_zip_success = any_zip_success or success
-                if not dry_run:
-                    data_tracker.record(zip_code, row_count)
-                async with store_context_lock:
-                    if store_context_retry_candidates:
-                        pending_batch.extend(sorted(store_context_retry_candidates))
+            try:
+                pending_batch = list(zips)
+                while pending_batch:
+                    results = await asyncio.gather(
+                        *(_process_zip_with_cursor(zip_code) for zip_code in pending_batch)
+                    )
+                    for result in results:
+                        zip_code, items, alerts, success, row_count = result
+                        total_items += items
+                        total_alerts += alerts
+                        any_zip_success = any_zip_success or success
+                        if not dry_run:
+                            data_tracker.record(zip_code, row_count)
+                    async with store_context_lock:
+                        pending_batch = list(store_context_retry_candidates)
                         store_context_retry_candidates.clear()
-            if store_context_skipped:
-                LOGGER.warning(
-                    "Skipped %d ZIPs after repeated store-context failures: %s",
-                    len(store_context_skipped),
-                    ", ".join(sorted(store_context_skipped)),
-                )
-        finally:
-            await close_browser(browser, persistent_context)
+                if store_context_skipped:
+                    LOGGER.warning(
+                        "Skipped %d ZIPs after repeated store-context failures: %s",
+                        len(store_context_skipped),
+                        ", ".join(sorted(store_context_skipped)),
+                    )
+            finally:
+                await close_browser(browser, persistent_context)
     finally:
         memory_watchdog.stop()
         duration = time.monotonic() - start
@@ -2337,9 +2235,7 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         return
 
     notifier = Notifier()
-    zip_tracker = ZipProgressTracker(
-        ZIP_CURSOR_FILE, ZIP_HISTORY_FILE, ZIP_WATCHDOG_MINUTES, attempts_path=ZIP_ATTEMPTS_FILE
-    )
+    zip_tracker = ZipProgressTracker(ZIP_CURSOR_FILE, ZIP_HISTORY_FILE, ZIP_WATCHDOG_MINUTES)
     metrics = MetricsEmitter(
         METRICS_LOG_FILE,
         METRICS_SUMMARY_FILE,
@@ -2357,28 +2253,12 @@ async def _async_main(argv: Iterable[str] | None = None) -> None:
         dashboard_server, dashboard_thread = _start_dashboard_background()
         print("Dashboard running at http://localhost:8000")
 
-    recovery_sleep = max(5, int(os.getenv("CHEAPSKATER_RECOVERY_SLEEP_SECONDS", "15")))
-    recovery_backoff = recovery_sleep
-    while True:
-        try:
-            await _run_cycle(
-                args,
-                config,
-                categories,
-                session_factory,
-                notifier,
-                zip_tracker,
-                metrics,
-                data_tracker,
-            )
-            break
-        except Exception:
-            LOGGER.exception(
-                "Run cycle failed; retrying in %ss",
-                recovery_backoff,
-            )
-            await asyncio.sleep(recovery_backoff)
-            recovery_backoff = min(recovery_backoff * 2, 300)
+    try:
+        await _run_cycle(args, config, categories, session_factory, notifier, zip_tracker, metrics, data_tracker)
+    except Exception:
+        LOGGER.exception("Initial run cycle failed")
+        dashboard_server, dashboard_thread = _stop_dashboard_background(dashboard_server, dashboard_thread)
+        raise
 
     interval_minutes = config.get("schedule", {}).get("minutes", 180) or 180
     retention_value = config.get("quarantine_retention_days", 30)
@@ -2461,7 +2341,6 @@ def main() -> None:
 
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
 ZIP_HISTORY_FILE = Path(os.getenv("CHEAPSKATER_ZIP_HISTORY", "logs/zip_history.json"))
-ZIP_ATTEMPTS_FILE = Path(os.getenv("CHEAPSKATER_ZIP_ATTEMPTS", "logs/zip_attempts.json"))
 ZIP_RESUME_ENABLED = os.getenv("CHEAPSKATER_RESUME_ZIPS", "1") not in {"0", "false", "False"}
 ZIP_PROGRESS_TIMEOUT_MINUTES = float(os.getenv("CHEAPSKATER_ZIP_TIMEOUT_MINUTES", "45"))
 BROWSER_ZIP_RESTART_LIMIT = max(0, int(os.getenv("CHEAPSKATER_BROWSER_ZIP_LIMIT", "10")))

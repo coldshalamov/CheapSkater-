@@ -216,10 +216,9 @@
                     </div>
                     <div class="store-meta">
                         <span class="availability-badge {{ availability_class }}">{{ availability_text }}</span>
-                        {% if store.stock_estimate is not none %}
-                        <span class="stock-pill">Stock: {{ store.stock_estimate }}</span>
-                        {% elif store.stock_label %}
-                        <span class="stock-pill">{{ store.stock_label }}</span>
+                        {% set stock_text = store.stock_label or (store.stock_estimate is not none and (store.stock_estimate ~ " in stock")) %}
+                        {% if stock_text %}
+                        <span class="stock-pill">{{ stock_text }}</span>
                         {% endif %}
                         {% if store.updated_at %}
                         <span class="timestamp">Updated {{ format_timestamp(store.updated_at) }}</span>
@@ -289,10 +288,9 @@
                             </div>
                             <div class="store-meta">
                                 <span class="availability-badge {{ availability_class }}">{{ availability_text }}</span>
-                                {% if store.stock_estimate is not none %}
-                                <span class="stock-pill">Stock: {{ store.stock_estimate }}</span>
-                                {% elif store.stock_label %}
-                                <span class="stock-pill">{{ store.stock_label }}</span>
+                                {% set stock_text = store.stock_label or (store.stock_estimate is not none and (store.stock_estimate ~ " in stock")) %}
+                                {% if stock_text %}
+                                <span class="stock-pill">{{ stock_text }}</span>
                                 {% endif %}
                                 {% if store.updated_at %}
                                 <span class="timestamp">Updated {{ format_timestamp(store.updated_at) }}</span>
@@ -455,9 +453,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const savingsPct = store.price_was && store.price
       ? Math.floor(Math.max(store.price_was - store.price, 0) / store.price_was * 100)
       : null;
-    const stockText = store.stock_estimate !== null && store.stock_estimate !== undefined
-      ? `Stock: ${store.stock_estimate}`
-      : (store.stock_label || '');
+    const stockText = store.stock_label
+      || (store.stock_estimate !== null && store.stock_estimate !== undefined
+        ? `${store.stock_estimate} in stock`
+        : '');
     const storeNumber = store.store_id || store.store_number || '';
     const sku = store.sku || defaultSku || '';
     const canSave = Boolean(storeNumber && sku);
