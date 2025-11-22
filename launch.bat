@@ -51,32 +51,30 @@ set "CHEAPSKATER_CATEGORY_DELAY_MAX_MS=1900"
 set "CHEAPSKATER_ZIP_DELAY_MIN_MS=3000"
 set "CHEAPSKATER_ZIP_DELAY_MAX_MS=7000"
 set "CHEAPSKATER_MOUSE_JITTER=1"
-set "CHEAPSKATER_SLOW_MO_MS=12"
+set "CHEAPSKATER_SLOW_MO_MS=0"
+set "CHEAPSKATER_USER_DATA_DIR=none"
+set "CHEAPSKATER_BROWSER_ZIP_LIMIT=0"
+set "CHEAPSKATER_CHROMIUM_ARGS=--disable-blink-features=AutomationControlled --disable-dev-shm-usage --lang=en-US --no-default-browser-check --window-size=1440,960"
 set "LOG_LEVEL=INFO"
 
 REM --- Optional ZIP override ---
-set "EXTRA_ARGS="
+set "EXTRA_ARGS=--concurrency 1"
 if not "%~1"=="" (
-    set "EXTRA_ARGS=--zip %~1"
+    set "EXTRA_ARGS=%EXTRA_ARGS% --zip %~1"
 )
+REM --- Optional proxy: set CHEAPSKATER_PROXY before launch, e.g.
+REM set "CHEAPSKATER_PROXY=http://user:pass@host:port"
 
-REM --- Run a probe (quick test) ---
 set "DASHBOARD_LOG=%LOG_DIR%\dashboard_%timestamp%.log"
 echo Launching dashboard server ^(logs -> %DASHBOARD_LOG%^)... 
 start "CheapSkater Dashboard" cmd /c ""%CD%\.venv\Scripts\python.exe" -m uvicorn app.dashboard:app --host 0.0.0.0 --port 8000 >> "%DASHBOARD_LOG%" 2>&1"
 timeout /t 3 >nul
-start "" "http://localhost:8000" >nul 2>&1
-
-echo Running probe %EXTRA_ARGS%...
-python -m app.main --probe --probe-cache-minutes 60 %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
-if errorlevel 1 (
-    echo Probe failed! Check %LOG_FILE%
-    pause
-    exit /b 1
+if /i not "%CHEAPSKATER_SKIP_DASHBOARD_OPEN%"=="1" (
+    start "" "http://localhost:8000" >nul 2>&1
 )
 
-REM --- Start long-running scraper (Ctrl+C to stop) ---
-echo Launching scraper (Ctrl+C to stop)...
+REM --- Start scraper (Ctrl+C to stop) ---
+echo Launching scraper (full run, no probe) %EXTRA_ARGS% ...
 python -m app.main %EXTRA_ARGS% >>"%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo Scraper run failed! Check %LOG_FILE%

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import random
 import shlex
 from functools import lru_cache
 from pathlib import Path
@@ -10,6 +12,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from playwright.async_api import Browser, BrowserContext, Playwright
+
+LOGGER = logging.getLogger(__name__)
 
 _FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -44,7 +48,7 @@ def _env_float(name: str, default: float) -> float:
 def headless_enabled() -> bool:
     """Return True if Playwright should run in headless mode."""
 
-    # Default to headful to better mimic a real browser.
+    # Default to headful for stability; override via env if needed.
     return _as_bool(os.getenv("CHEAPSKATER_HEADLESS"), False)
 
 
@@ -57,51 +61,47 @@ def selector_validation_skipped() -> bool:
 def stealth_enabled() -> bool:
     """Return True when stealth evasion scripts should be applied."""
 
-    return _as_bool(os.getenv("CHEAPSKATER_STEALTH"), True)
+    return _as_bool(os.getenv("CHEAPSKATER_ENABLE_STEALTH"), False)
 
 
 @lru_cache(maxsize=1)
 def _stealth_instance():
-    if not stealth_enabled():
-        return None
     try:
         from playwright_stealth import Stealth
     except Exception:
         return None
-
-    lang_env = os.getenv("CHEAPSKATER_LANGS") or "en-US,en"
-    langs = tuple(
-        entry.strip()
-        for entry in lang_env.split(",")
-        if entry.strip()
-    ) or ("en-US", "en")
-
-    return Stealth(
-        navigator_languages_override=langs[:2],
-        navigator_platform_override=os.getenv("CHEAPSKATER_PLATFORM", "Win32"),
-        navigator_user_agent_override=os.getenv("CHEAPSKATER_STEALTH_UA") or os.getenv("USER_AGENT"),
-        navigator_vendor_override=os.getenv("CHEAPSKATER_VENDOR", "Google Inc."),
-    )
+    try:
+        return Stealth()
+    except Exception:
+        return None
 
 
 def apply_stealth(playwright: Playwright) -> None:
     """Hook the provided Playwright object with stealth evasions when available."""
 
-    instance = _stealth_instance()
-    if instance is None:
+    if not stealth_enabled():
         return
+
+    stealth = _stealth_instance()
+    if stealth is None:
+        return
+
     try:
-        instance.hook_playwright_context(playwright)
+        stealth.apply(playwright)
     except Exception:
-        # Best-effort; fall back silently if Playwright internals change.
-        pass
+        LOGGER.debug("Stealth apply() failed; continuing without extra patches")
 
 
 def _user_data_dir() -> Path | None:
     raw = os.getenv("CHEAPSKATER_USER_DATA_DIR")
-    # Default to a persistent profile to reuse cookies/fingerprint between runs.
-    if not raw:
-        raw = ".playwright-profile/chromium"
+    # Default to no persistent profile unless explicitly provided.
+    if raw is None:
+        return None
+
+    lowered = raw.strip().lower()
+    if lowered in {"none", "off", "disable", "disabled", ""}:
+        return None
+
     path = Path(raw).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -138,9 +138,12 @@ def launch_kwargs() -> dict[str, Any]:
         "--disable-infobars",
         "--lang=en-US",
         "--no-default-browser-check",
-        "--start-maximized",
-        "--window-size=1440,960",
     ]
+    try:
+        width, height = random.choice([(1280, 720), (1366, 768), (1440, 900), (1600, 900)])
+        args.append(f"--window-size={width},{height}")
+    except Exception:
+        args.append("--window-size=1440,900")
     extra_args = os.getenv("CHEAPSKATER_CHROMIUM_ARGS")
     if extra_args:
         args.extend(shlex.split(extra_args))
@@ -150,7 +153,8 @@ def launch_kwargs() -> dict[str, Any]:
         "args": args,
     }
 
-    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL", "chromium")
+    # Use provided channel only if explicitly set.
+    channel = os.getenv("CHEAPSKATER_BROWSER_CHANNEL")
     if channel:
         kwargs["channel"] = channel
 
@@ -171,20 +175,75 @@ def launch_kwargs() -> dict[str, Any]:
 async def launch_browser(playwright: Playwright) -> tuple[Browser, BrowserContext | None]:
     """Launch Chromium according to env overrides. Returns (browser, persistent_context)."""
 
-    user_dir = _user_data_dir()
+    cdp_url = os.getenv("CHEAPSKATER_CDP_URL")
+    if cdp_url:
+        try:
+            browser = await playwright.chromium.connect_over_cdp(cdp_url.strip())
+            page = None
+            # Prefer existing page/context; as a fallback create a single page.
+            if browser.contexts and browser.contexts[0].pages:
+                page = browser.contexts[0].pages[0]
+            elif browser.contexts:
+                page = await browser.contexts[0].new_page()
+            else:
+                page = await browser.new_page()
+
+            context: BrowserContext | None = page.context if page is not None else None
+            if context is None:
+                raise RuntimeError("CDP attached but no open browser context/page was found.")
+
+            try:
+                setattr(browser, "_cheapskater_external", True)
+                if context is not None:
+                    setattr(context, "_cheapskater_external", True)
+                if page is not None:
+                    setattr(page, "_cheapskater_external", True)
+            except Exception:
+                pass
+            return browser, context
+        except Exception as exc:
+            # CDP is required when provided; surface as fatal so the user can reopen Chrome.
+            raise RuntimeError(f"CDP attach failed: {exc}") from exc
+
     kwargs = launch_kwargs()
-    if user_dir is not None:
-        context = await playwright.chromium.launch_persistent_context(str(user_dir), **kwargs)
-        return context.browser, context
+    channel = kwargs.pop("channel", None)
+    user_data_dir = _user_data_dir()
+
+    if user_data_dir is not None:
+        try:
+            if channel:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=user_data_dir,
+                    channel=channel,
+                    **kwargs,
+                )
+            else:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=user_data_dir,
+                    **kwargs,
+                )
+            return context.browser, context
+        except Exception as exc:
+            LOGGER.warning("Persistent context launch failed, falling back: %s", exc)
+
+    if channel:
+        try:
+            browser = await playwright.chromium.launch(channel=channel, **kwargs)
+            return browser, None
+        except Exception as exc:
+            LOGGER.warning("Channel launch failed (%s); retrying default Chromium", exc)
 
     browser = await playwright.chromium.launch(**kwargs)
     return browser, None
+
 
 
 async def close_browser(browser: Browser | None, context: BrowserContext | None) -> None:
     """Close the provided browser/context pair without raising."""
 
     if context is not None:
+        if getattr(context, "_cheapskater_external", False):
+            return
         try:
             await context.close()
         except Exception:
@@ -192,6 +251,8 @@ async def close_browser(browser: Browser | None, context: BrowserContext | None)
         return
 
     if browser is not None:
+        if getattr(browser, "_cheapskater_external", False):
+            return
         try:
             await browser.close()
         except Exception:

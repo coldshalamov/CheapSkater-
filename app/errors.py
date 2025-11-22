@@ -44,11 +44,13 @@ class StoreContextError(Exception):
         url: Optional[str] = None,
         zip_code: Optional[str] = None,
         category: Optional[str] = None,
+        step: Optional[str] = None,
     ) -> None:
         self.message = message
         self.url = url
         self.zip_code = zip_code
         self.category = category
+        self.step = step
         super().__init__(message)
 
     def __str__(self) -> str:
@@ -59,6 +61,8 @@ class StoreContextError(Exception):
             context_parts.append(f"zip={self.zip_code}")
         if self.category:
             context_parts.append(f"category={self.category}")
+        if self.step:
+            context_parts.append(f"step={self.step}")
         context = ", ".join(context_parts)
         return f"{self.message} ({context})" if context else self.message
 

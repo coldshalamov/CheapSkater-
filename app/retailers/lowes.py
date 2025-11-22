@@ -1,11 +1,14 @@
 """Lowe's retailer scraping interface."""
 
 from __future__ import annotations
+import asyncio
 import json
 import os
 import random
 import re
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
@@ -23,13 +26,39 @@ from app.playwright_env import (
     apply_stealth,
     category_delay_bounds,
     headless_enabled,
+    launch_browser,
+    close_browser,
     mouse_jitter_enabled,
 )
-from app.playwright_env import headless_enabled
 
 LOGGER = get_logger(__name__)
 BASE_URL = "https://www.lowes.com"
 GOTO_TIMEOUT_MS = 60000
+# A small pool of realistic desktop Chrome UAs to reduce bot detection when no USER_AGENT is provided.
+DEFAULT_UAS: tuple[str, ...] = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.94 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.86 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.78 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.23 Safari/537.36",
+)
+# Common desktop viewport sizes to randomise per session.
+COMMON_VIEWPORTS: tuple[tuple[int, int], ...] = (
+    (1440, 900),
+    (1366, 768),
+    (1536, 864),
+    (1600, 900),
+)
+# Common navigator fingerprints to keep environment consistent with UA.
+NAV_FINGERPRINT = {
+    "languages": ["en-US", "en"],
+    "platform": "Win32",
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "plugins": [1, 2, 3, 4],
+}
+
+# Keep a simple-mode escape hatch to avoid fragile per-context header/init mutations.
+SIMPLE_MODE = os.getenv("CHEAPSKATER_SIMPLE", "1").strip().lower() not in {"0", "false", "no", "off"}
 BACK_AISLE_PAGE_SIZE = 24
 MAX_BACK_AISLE_PAGES = 80
 MAX_EMPTY_PAGE_RESULTS = 1
@@ -47,7 +76,11 @@ BACK_AISLE_DEPARTMENTS: dict[str, str] = {
 def _resolve_user_agent() -> str | None:
     value = os.getenv("USER_AGENT")
     if not value:
-        return None
+        # Pick a realistic default UA when none provided.
+        try:
+            return random.choice(list(DEFAULT_UAS))
+        except Exception:
+            return None
     trimmed = value.strip()
     return trimmed or None
 
@@ -176,6 +209,11 @@ async def _jitter_mouse(page: Any) -> None:
             steps = random.randint(3, 7)
             await page.mouse.move(target_x, target_y, steps=steps)
             await human_wait(120, 320, obey_policy=False)
+        # Occasional gentle scroll to look more human.
+        if random.random() < 0.6:
+            delta_y = random.randint(200, 800)
+            await page.mouse.wheel(0, delta_y)
+            await human_wait(180, 420, obey_policy=False)
     except Exception:
         # Non-fatal; simply skip cursor jitter if Playwright rejects the move.
         return
@@ -422,36 +460,19 @@ async def _wait_for_store_cards(page: Any, timeout: int = 20000) -> bool:
         return False
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_random_exponential(multiplier=0.5, max=5),
-    reraise=True,
-)
-async def set_store_context(
-    page: Any,
-    zip_code: str,
-    *,
-    user_agent: str | None = None,
-    store_hint: dict[str, str] | None = None,
-) -> tuple[str, str]:
-    """Set the Lowe's store context for *zip_code* and return (store_id, store_name)."""
 
-    if user_agent is None:
-        user_agent = _resolve_user_agent()
-
+async def _navigate_and_check_initial_state(page: Any, zip_code: str, user_agent: str | None) -> tuple[str, str] | None:
+    """Navigate to the homepage and check for a cached or pre-selected store."""
     if user_agent:
         try:
             await page.context.set_extra_http_headers({"User-Agent": user_agent})
-        except Exception:  # pragma: no cover - defensive
-            LOGGER.debug(
-                "Unable to set USER_AGENT override; continuing with default",
-                extra={"zip": zip_code},
-            )
+        except Exception:
+            LOGGER.debug("Unable to set USER_AGENT override; continuing with default", extra={"zip": zip_code})
 
     try:
-        await page.goto("https://www.lowes.com/", wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
-    except Exception as exc:  # pragma: no cover - network failure
-        raise StoreContextError(zip_code=zip_code) from exc
+        await page.goto(f"{BASE_URL}/", wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+    except Exception as exc:
+        raise StoreContextError(zip_code=zip_code, step="navigate_and_check") from exc
 
     await _safe_wait_for_load(page, "networkidle")
     await human_wait(900, 1500)
@@ -461,51 +482,48 @@ async def set_store_context(
     badge_locator = await _locator_or_none(page, selectors.STORE_BADGE)
     badge_text = None
     badge_store_id = None
-    if badge_locator is not None:
+    if badge_locator:
         try:
             await badge_locator.wait_for(state="visible", timeout=6000)
+            badge_text = await inner_text_safe(badge_locator)
+            badge_store_id = await _safe_get_attribute(badge_locator, "data-storeid")
         except Exception:
             pass
-        badge_text = await inner_text_safe(badge_locator)
-        badge_store_id = await _safe_get_attribute(badge_locator, "data-storeid")
 
-    if _store_badge_matches_cached(
-        cached_store,
-        badge_store_id=badge_store_id,
-        badge_text=badge_text,
-    ):
+    if _store_badge_matches_cached(cached_store, badge_store_id=badge_store_id, badge_text=badge_text):
         resolved_name = badge_text or (cached_store or {}).get("store_name") or f"Lowe's ({zip_code})"
         resolved_id = badge_store_id or (cached_store or {}).get("store_id") or f"{zip_code}:{resolved_name.strip()}"
-        LOGGER.info(
-            "Store already set via persistent profile | store=%s | zip=%s",
-            resolved_name.strip(),
-            zip_code,
-        )
+        LOGGER.info("Store already set via persistent profile | store=%s | zip=%s", resolved_name.strip(), zip_code)
         _cache_store_selection(zip_code, resolved_id, resolved_name)
         return resolved_id.strip(), resolved_name.strip()
 
+    return None
+
+
+async def _open_store_modal(page: Any, zip_code: str) -> None:
+    """Find and click the store selection trigger to open the modal."""
+    badge_locator = await _locator_or_none(page, selectors.STORE_BADGE)
     triggers: list[Any] = []
-    if badge_locator is not None:
+    if badge_locator:
         triggers.append(badge_locator)
     try:
         triggers.append(page.get_by_role("button", name=_STORE_BADGE_FALLBACK))
-    except Exception:
-        pass
-    try:
         triggers.append(page.get_by_role("link", name=_STORE_BADGE_FALLBACK))
     except Exception:
         pass
     triggers.append(page.locator("text=/Find a Store/i"))
 
-    await _safe_click(triggers)
+    if not await _safe_click(triggers):
+        raise StoreContextError(zip_code=zip_code, step="open_modal")
+
     await _jitter_mouse(page)
 
+
+async def _submit_zip_code(page: Any, zip_code: str) -> None:
+    """Find the ZIP input, fill it, and submit the store search form."""
     search_locators: list[Any] = []
     try:
         search_locators.append(page.get_by_role("textbox", name=re.compile("zip", re.I)))
-    except Exception:
-        pass
-    try:
         search_locators.append(page.get_by_placeholder(re.compile("zip|store|city", re.I)))
     except Exception:
         pass
@@ -513,13 +531,13 @@ async def set_store_context(
         search_locators.append(page.locator(selector))
 
     zip_input = await _first_locator(search_locators)
-    if zip_input is None:
-        raise StoreContextError(zip_code=zip_code)
+    if not zip_input:
+        raise StoreContextError(zip_code=zip_code, step="find_zip_input")
 
     try:
         await zip_input.fill(zip_code)
     except Exception as exc:
-        raise StoreContextError(zip_code=zip_code) from exc
+        raise StoreContextError(zip_code=zip_code, step="fill_zip_input") from exc
 
     submit_attempts = 0
     while submit_attempts < 2:
@@ -537,57 +555,46 @@ async def set_store_context(
 
         await human_wait(600, 1200)
         if await _wait_for_store_cards(page, timeout=14000):
-            break
+            return
 
-        LOGGER.warning(
-            "Store results did not load for zip=%s on attempt=%s; retrying form submission",
-            zip_code,
-            submit_attempts,
-        )
+        LOGGER.warning("Store results did not load for zip=%s attempt=%s; retrying", zip_code, submit_attempts)
         try:
             await zip_input.fill("")
+            await human_wait(200, 400)
+            await zip_input.fill(zip_code)
         except Exception:
             pass
-        await human_wait(200, 400)
-        await zip_input.fill(zip_code)
 
     if not await _wait_for_store_cards(page, timeout=12000):
-        raise StoreContextError(zip_code=zip_code)
+        raise StoreContextError(zip_code=zip_code, step="wait_for_store_cards")
 
-    option_locators: list[Any] = []
-    option_locators.append(page.locator("button:has-text('Set Store')"))
-    option_locators.append(page.locator("button:has-text('Make This My Store')"))
-    option_locators.append(page.locator("button:has-text('Select Store')"))
-    try:
-        option_locators.append(page.get_by_role("button", name=_STORE_BUTTON_TEXT))
-    except Exception:
-        pass
 
+async def _select_store_from_results(page: Any, zip_code: str, store_hint: dict[str, str] | None) -> tuple[str, str]:
+    """Select the best store from the results and return its (ID, name)."""
     target_store_id = (store_hint or {}).get("store_id")
-    store_choice = await _find_store_result_button(
-        page,
-        zip_code,
-        preferred_store_id=target_store_id,
-    )
-    store_button = store_choice.button
-    if store_button is None:
-        LOGGER.warning("Falling back to generic store button selection | zip=%s", zip_code)
-        store_button = await _first_locator(option_locators)
-        store_choice = _StoreChoice(
-            button=store_button,
-            store_id=None,
-            store_name=None,
-            zip_code=None,
-        )
-    if store_button is None:
-        raise StoreContextError(zip_code=zip_code)
+    store_choice = await _find_store_result_button(page, zip_code, preferred_store_id=target_store_id)
 
-    store_id = await _safe_get_attribute(store_button, "data-storeid")
-    if store_id is None:
-        store_id = await _safe_get_attribute(store_button, "data-store-id")
-    if store_id is None:
-        store_id = store_choice.store_id
-    if store_id is None:
+    store_button = store_choice.button
+    if not store_button:
+        LOGGER.warning("Falling back to generic store button for zip=%s", zip_code)
+        option_locators: list[Any] = []
+        try:
+            option_locators.append(page.locator("button:has-text('Set Store')"))
+            option_locators.append(page.locator("button:has-text('Make This My Store')"))
+            option_locators.append(page.locator("button:has-text('Select Store')"))
+            option_locators.append(page.get_by_role("button", name=_STORE_BUTTON_TEXT))
+        except Exception:
+            pass
+        store_button = await _first_locator(option_locators)
+
+    if not store_button:
+        raise StoreContextError(zip_code=zip_code, step="find_store_button")
+
+    store_id = await _safe_get_attribute(store_button, "data-storeid") or \
+               await _safe_get_attribute(store_button, "data-store-id") or \
+               store_choice.store_id
+
+    if not store_id:
         cached_modal = _STORE_MODAL_CACHE.get(zip_code)
         if cached_modal and cached_modal.get("store_id"):
             store_id = cached_modal.get("store_id")
@@ -595,46 +602,72 @@ async def set_store_context(
     try:
         await store_button.click()
     except Exception as exc:
-        raise StoreContextError(zip_code=zip_code) from exc
+        raise StoreContextError(zip_code=zip_code, step="click_store_button") from exc
 
     await human_wait(1400, 2200, obey_policy=False)
     await _jitter_mouse(page)
 
+    final_id = store_id or store_choice.store_id or (store_hint or {}).get("store_id")
+    final_name = store_choice.store_name or (store_hint or {}).get("store_name") or f"Lowe's ({zip_code})"
+    return (final_id or f"{zip_code}:{final_name.strip()}"), final_name
+
+
+async def _confirm_store_selection(page: Any, zip_code: str, store_id: str, store_name: str) -> tuple[str, str]:
+    """Confirm the store selection by checking the badge and return final (ID, name)."""
     badge_locator = await _locator_or_none(page, selectors.STORE_BADGE)
-    store_name = None
-    if badge_locator is not None:
+    final_store_id, final_store_name = store_id, store_name
+
+    if badge_locator:
         try:
             await badge_locator.wait_for(state="visible", timeout=10000)
-            store_name = await inner_text_safe(badge_locator)
+            badge_text = await inner_text_safe(badge_locator)
             badge_store_id = await _safe_get_attribute(badge_locator, "data-storeid")
             if badge_store_id:
-                store_id = badge_store_id
+                final_store_id = badge_store_id
+            if badge_text:
+                final_store_name = badge_text
         except Exception:
             LOGGER.warning("Store badge did not confirm selection for zip=%s", zip_code)
     else:
         LOGGER.warning("Store badge locator missing after selecting zip=%s", zip_code)
 
-    hinted_name = (store_hint or {}).get("store_name")
-    hinted_id = (store_hint or {}).get("store_id")
+    final_store_name = _clean_store_name(final_store_name) or f"Lowe's ({zip_code})"
+    _cache_store_selection(zip_code, final_store_id, final_store_name)
+    LOGGER.info("store=%s zip=%s", final_store_name.strip(), zip_code, extra={"zip": zip_code})
+    return final_store_id.strip(), final_store_name.strip()
 
-    if not store_name:
-        store_name = store_choice.store_name or hinted_name or f"Lowe's ({zip_code})"
-    if store_id is None:
-        store_id = store_choice.store_id or hinted_id or f"{zip_code}:{store_name.strip()}"
-    if store_id is None:
-        store_id = f"{zip_code}:{store_name.strip()}"
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=0.5, max=5),
+    reraise=True,
+)
+async def set_store_context(
+    page: Any,
+    zip_code: str,
+    *,
+    user_agent: str | None = None,
+    store_hint: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    """Set the Lowe's store context for *zip_code* and return (store_id, store_name)."""
 
-    store_name = _clean_store_name(store_name) or hinted_name or f"Lowe's ({zip_code})"
+    user_agent = user_agent or _resolve_user_agent()
 
-    _cache_store_selection(zip_code, store_id, store_name)
+    # 1. Navigate and check if the store is already set
+    initial_store = await _navigate_and_check_initial_state(page, zip_code, user_agent)
+    if initial_store:
+        return initial_store
 
-    LOGGER.info(
-        "store=%s zip=%s",
-        store_name.strip(),
-        zip_code,
-        extra={"zip": zip_code},
-    )
-    return store_id.strip(), store_name.strip()
+    # 2. Open the store selection modal
+    await _open_store_modal(page, zip_code)
+
+    # 3. Submit the ZIP code
+    await _submit_zip_code(page, zip_code)
+
+    # 4. Select the store from the results
+    selected_id, selected_name = await _select_store_from_results(page, zip_code, store_hint)
+
+    # 5. Confirm the selection and return the final store details
+    return await _confirm_store_selection(page, zip_code, selected_id, selected_name)
 
 
 def _prepare_category_url(url: str, store_id: str | None, *, offset: int = 0) -> str:
@@ -675,7 +708,19 @@ async def _warmup_home(page: Any) -> None:
     try:
         await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
         await _safe_wait_for_load(page, "networkidle")
-        await human_wait(300, 600)
+        await human_wait(800, 1400)
+        await page.mouse.wheel(0, random.randint(400, 1200))
+        await human_wait(600, 1200)
+        await _jitter_mouse(page)
+        # Optional harmless navigation to blend in.
+        if random.random() < 0.5:
+            try:
+                await page.goto(urljoin(BASE_URL, "/c/Tools"), wait_until="domcontentloaded", timeout=30000)
+                await human_wait(700, 1200)
+                await page.mouse.wheel(0, random.randint(300, 900))
+                await human_wait(500, 1000)
+            except Exception:
+                pass
     except Exception:
         # Non-fatal; continue even if warmup fails.
         return
@@ -1215,23 +1260,28 @@ async def run_for_zip(
     async def _execute(active_playwright: Any) -> list[dict[str, Any]]:
         extra = {"zip": zip_code}
         active_browser = browser
+        active_context = shared_context
         owns_browser = active_browser is None
         user_agent = _resolve_user_agent()
 
         try:
             if owns_browser:
-                active_browser = await active_playwright.chromium.launch(
-                    headless=headless_enabled()
-                )
+                active_browser, active_context = await launch_browser(active_playwright)
 
             assert active_browser is not None
 
+            try:
+                viewport = random.choice(list(COMMON_VIEWPORTS))
+            except Exception:
+                viewport = (1440, 900)
+
             context_kwargs: dict[str, Any] = {
-                "viewport": {"width": 1440, "height": 900},
+                "viewport": {"width": viewport[0], "height": viewport[1]},
                 "storage_state": None,
+                "locale": "en-US",
+                "user_agent": user_agent,
             }
-            if user_agent:
-                context_kwargs["user_agent"] = user_agent
+            # Keep per-context headers isolated; user_agent may be None if env overrides are empty.
 
             results: list[dict[str, Any]] = []
 
@@ -1239,13 +1289,125 @@ async def run_for_zip(
             owns_context = False
             page: Any | None = None
             try:
-                if shared_context is not None:
-                    context = shared_context
+                if active_context is not None:
+                    context = active_context
                 else:
                     context = await active_browser.new_context(**context_kwargs)
                     owns_context = True
 
-                page = await context.new_page()
+                external_ctx = getattr(context, "_cheapskater_external", False)
+
+                if (not SIMPLE_MODE) and not external_ctx and not getattr(context, "_cheapskater_init_applied", False):
+                    try:
+                        await context.set_extra_http_headers(
+                            {
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.9",
+                                "Upgrade-Insecure-Requests": "1",
+                                "Referer": BASE_URL + "/",
+                                "Sec-Fetch-Site": "same-origin",
+                                "Sec-Fetch-Mode": "navigate",
+                                "Sec-Fetch-Dest": "document",
+                                "Sec-CH-UA": '"Not A(Brand";v="99", "Google Chrome";v="124", "Chromium";v="124"',
+                                "Sec-CH-UA-Mobile": "?0",
+                                "Sec-CH-UA-Platform": '"Windows"',
+                                # Send sensor-friendly hints commonly emitted by real Chrome
+                                "DNT": "0",
+                                "Pragma": "no-cache",
+                                "Cache-Control": "no-cache",
+                            }
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        fp = {
+                            "languages": NAV_FINGERPRINT["languages"],
+                            "platform": NAV_FINGERPRINT["platform"],
+                            "hardwareConcurrency": NAV_FINGERPRINT["hardwareConcurrency"],
+                            "deviceMemory": NAV_FINGERPRINT["deviceMemory"],
+                            "glVendor": "Intel Inc.",
+                            "glRenderer": "Intel(R) UHD Graphics",
+                        }
+                        init_script = """
+                            (() => {
+                              const fp = %FP%;
+                              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                              Object.defineProperty(navigator, 'languages', { get: () => fp.languages });
+                              Object.defineProperty(navigator, 'platform', { get: () => fp.platform });
+                              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => fp.hardwareConcurrency });
+                              Object.defineProperty(navigator, 'deviceMemory', { get: () => fp.deviceMemory });
+                              Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4] });
+                         window.chrome = window.chrome || { runtime: {} };
+                              // Navigator vendor/productSub
+                              Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+                              Object.defineProperty(navigator, 'productSub', { get: () => '20030107' });
+
+                              const origQuery = navigator.permissions && navigator.permissions.query;
+                              if (origQuery) {
+                                navigator.permissions.query = (params) => {
+                                  if (params && params.name === 'notifications') {
+                                    return Promise.resolve({ state: Notification.permission });
+                                  }
+                                  return origQuery(params);
+                                };
+                              }
+
+                              const patchGl = (gl) => {
+                                const origGetParameter = gl.getParameter.bind(gl);
+                                gl.getParameter = (p) => {
+                                  if (p === 0x1F00) return fp.glVendor;
+                                  if (p === 0x1F01) return fp.glRenderer;
+                                  return origGetParameter(p);
+                                };
+                              };
+                              ['getContext', 'webkitGetContext'].forEach((key) => {
+                                const orig = HTMLCanvasElement.prototype[key];
+                                if (!orig) return;
+                                HTMLCanvasElement.prototype[key] = function(type, attrs) {
+                                  const ctx = orig.call(this, type, attrs);
+                                  if (ctx && (type === 'webgl' || type === 'experimental-webgl')) {
+                                    try { patchGl(ctx); } catch (e) {}
+                                  }
+                                  return ctx;
+                                };
+                              });
+
+                              const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                              HTMLCanvasElement.prototype.toDataURL = function(...args) {
+                                try {
+                                  const ctx = this.getContext('2d');
+                                  if (ctx && this.width && this.height) {
+                                    ctx.fillStyle = 'rgba(0,0,0,0.001)';
+                                    ctx.fillRect(0, 0, 1, 1);
+                                  }
+                                } catch (e) {}
+                                return origToDataURL.apply(this, args);
+                              };
+                            })();
+                        """.replace("%FP%", json.dumps(fp))
+                        await context.add_init_script(init_script)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(context, "_cheapskater_init_applied", True)
+                    except Exception:
+                        pass
+
+                if getattr(context, "_cheapskater_external", False):
+                    # Reuse existing page or create via context; fall back to browser.new_page if needed.
+                    page = None
+                    try:
+                        if context.pages:
+                            page = context.pages[0]
+                        else:
+                            page = await context.new_page()
+                    except Exception:
+                        try:
+                            page = await active_browser.new_page()
+                        except Exception as exc:
+                            raise PlaywrightError(f"browser page inactive (cdp_no_page): {exc}") from exc
+                else:
+                    page = await context.new_page()
                 page_crashed = False
                 crash_reason = "page closed unexpectedly"
 
@@ -1254,7 +1416,7 @@ async def run_for_zip(
                     if not page_crashed:
                         crash_reason = reason
                         page_crashed = True
-                        LOGGER.error(
+                        LOGGER.warning(
                             "Playwright page event=%s zip=%s",
                             reason,
                             zip_code,
@@ -1274,26 +1436,36 @@ async def run_for_zip(
                         raise PlaywrightError(f"browser page inactive ({crash_reason})")
 
                 await _jitter_mouse(page)
-                store_hint_entry: dict[str, str] | None = None
-                if store_hints:
-                    hinted = store_hints.get(zip_code)
-                    if hinted:
-                        store_hint_entry = hinted[0]
-                        LOGGER.info(
-                            "Using store hint for zip=%s -> %s (%s)",
-                            zip_code,
-                            store_hint_entry.get("store_name"),
-                            store_hint_entry.get("store_id"),
-                        )
-                # Establish cookies before hitting deep Back Aisle links.
-                await _warmup_home(page)
-                store_id, store_name = await set_store_context(
-                    page,
-                    zip_code,
-                    user_agent=user_agent,
-                    store_hint=store_hint_entry,
-                )
-                _ensure_page_active()
+
+                store_id: str | None = None
+                store_name: str | None = None
+                if external_ctx:
+                    badge_text = await inner_text_safe(await _locator_or_none(page, selectors.STORE_BADGE))
+                    store_name = badge_text or f"Lowe's ({zip_code})"
+                    store_id = zip_code
+                else:
+                    store_hint_entry: dict[str, str] | None = None
+                    if store_hints:
+                        hinted = store_hints.get(zip_code)
+                        if hinted:
+                            store_hint_entry = hinted[0]
+                            LOGGER.info(
+                                "Using store hint for zip=%s -> %s (%s)",
+                                zip_code,
+                                store_hint_entry.get("store_name"),
+                                store_hint_entry.get("store_id"),
+                            )
+                    try:
+                        await _warmup_home(page)
+                    except Exception:
+                        pass
+                    store_id, store_name = await set_store_context(
+                        page,
+                        zip_code,
+                        user_agent=user_agent,
+                        store_hint=store_hint_entry,
+                    )
+                    _ensure_page_active()
 
                 categories_to_scrape: list[dict[str, str]] = []
                 for category in categories:
@@ -1328,6 +1500,7 @@ async def run_for_zip(
                         zip_code,
                         extra={"zip": zip_code, "category": name, "url": url},
                     )
+                    await human_wait(2500, 4500)
 
                     @retry(
                         stop=stop_after_attempt(3),
@@ -1384,8 +1557,8 @@ async def run_for_zip(
             return results
         finally:
             try:
-                if owns_browser and active_browser is not None:
-                    await active_browser.close()
+                if owns_browser:
+                    await close_browser(active_browser, active_context)
             except Exception as exc:
                 LOGGER.warning(
                     "Failed to close browser: %s",

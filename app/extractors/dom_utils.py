@@ -21,8 +21,8 @@ else:  # pragma: no cover - executed only when Playwright is absent.
 
 
 async def human_wait(
-    min_ms: int = 350,
-    max_ms: int = 900,
+    min_ms: int = 2000,
+    max_ms: int = 5000,
     *,
     obey_policy: bool = True,
 ) -> None:

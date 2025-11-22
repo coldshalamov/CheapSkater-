@@ -1291,10 +1291,10 @@ async def _run_cycle(
             async def _restart_browser(reason: str) -> None:
                 nonlocal browser, persistent_context
                 async with browser_restart_lock:
-                    LOGGER.warning("Restarting Playwright browser (%s)", reason)
+                    LOGGER.warning("Resetting Playwright browser state (%s)", reason)
                     await close_browser(browser, persistent_context)
                     health_monitor.record_browser_restart(reason=reason)
-                    browser, persistent_context = await launch_browser(playwright)
+                    browser, persistent_context = None, None
 
             async def _scrape_zip_with_recovery(
                 zip_code: str,
@@ -1313,6 +1313,9 @@ async def _run_cycle(
                             shared_context=persistent_context,
                             store_hints=store_hints,
                         )
+                    except GeneratorExit:
+                        # Treat user-triggered shutdown as a graceful stop for this ZIP.
+                        raise
                     except PlaywrightError as exc:
                         attempts += 1
                         health_monitor.record_http_error(
@@ -1328,9 +1331,14 @@ async def _run_cycle(
                             exc,
                             extra=zip_extra,
                         )
+                        # If we hit the limit, bail out gracefully with no rows instead of crashing the run.
                         if attempts > BROWSER_RECOVERY_ATTEMPTS:
-                            raise
-                        await _restart_browser("playwright_error")
+                            LOGGER.warning(
+                                "Playwright retry limit hit for zip=%s; returning no rows to continue.",
+                                zip_code,
+                                extra=zip_extra,
+                            )
+                            return []
                         if BROWSER_RESTART_DELAY > 0:
                             await asyncio.sleep(BROWSER_RESTART_DELAY)
 
@@ -1411,10 +1419,21 @@ async def _run_cycle(
                 try:
                     zip_extra = {"zip": zip_code}
                     metrics.emit("zip_started", zip=zip_code, run_id=run_id)
-                    rows = await _scrape_zip_with_recovery(
-                        zip_code,
-                        zip_extra=zip_extra,
-                    )
+                    try:
+                        rows = await _scrape_zip_with_recovery(
+                            zip_code,
+                            zip_extra=zip_extra,
+                        )
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "ZIP %s aborted early: %s",
+                            zip_code,
+                            exc,
+                            extra=zip_extra,
+                        )
+                        return 0, 0, False, 0
+                except GeneratorExit:
+                    raise
                 except StoreContextError as exc:
                     LOGGER.error(
                         "Unable to set store for ZIP %s: %s",
@@ -1530,6 +1549,8 @@ async def _run_cycle(
                         run_id=run_id,
                     )
                     return 0, 0, False, 0
+                except GeneratorExit:
+                    raise
                 except Exception as exc:  # pragma: no cover - defensive
                     LOGGER.exception(
                         "Unexpected failure scraping ZIP %s: %s",
@@ -1633,30 +1654,30 @@ async def _run_cycle(
                         zips_since_restart = 0
             return zip_code, items, alerts, success, row_count
 
-            try:
-                pending_batch = list(zips)
-                while pending_batch:
-                    results = await asyncio.gather(
-                        *(_process_zip_with_cursor(zip_code) for zip_code in pending_batch)
-                    )
-                    for result in results:
-                        zip_code, items, alerts, success, row_count = result
-                        total_items += items
-                        total_alerts += alerts
-                        any_zip_success = any_zip_success or success
-                        if not dry_run:
-                            data_tracker.record(zip_code, row_count)
-                    async with store_context_lock:
-                        pending_batch = list(store_context_retry_candidates)
-                        store_context_retry_candidates.clear()
-                if store_context_skipped:
-                    LOGGER.warning(
-                        "Skipped %d ZIPs after repeated store-context failures: %s",
-                        len(store_context_skipped),
-                        ", ".join(sorted(store_context_skipped)),
-                    )
-            finally:
-                await close_browser(browser, persistent_context)
+        try:
+            pending_batch = list(zips)
+            while pending_batch:
+                results = await asyncio.gather(
+                    *(_process_zip_with_cursor(zip_code) for zip_code in pending_batch)
+                )
+                for result in results:
+                    zip_code, items, alerts, success, row_count = result
+                    total_items += items
+                    total_alerts += alerts
+                    any_zip_success = any_zip_success or success
+                    if not dry_run:
+                        data_tracker.record(zip_code, row_count)
+                async with store_context_lock:
+                    pending_batch = list(store_context_retry_candidates)
+                    store_context_retry_candidates.clear()
+            if store_context_skipped:
+                LOGGER.warning(
+                    "Skipped %d ZIPs after repeated store-context failures: %s",
+                    len(store_context_skipped),
+                    ", ".join(sorted(store_context_skipped)),
+                )
+        finally:
+            await close_browser(browser, persistent_context)
     finally:
         memory_watchdog.stop()
         duration = time.monotonic() - start
