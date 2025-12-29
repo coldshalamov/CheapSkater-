@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: cheapskater-dashboard
+    env: docker
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: CHEAPSKATER_DB_PATH
+        value: /var/data/orwa_lowes.sqlite
+      - key: CHEAPSKATER_SESSION_SECRET
+        generateValue: true
+      - key: PORT
+        value: 8000
+    disk:
+      name: cheapskater-data
+      mountPath: /var/data
+      sizeGB: 1

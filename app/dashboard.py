@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -33,7 +33,7 @@ LOGGER = get_logger(__name__)
 BASE_PATH = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_PATH / "templates"
 STATIC_DIR = BASE_PATH / "static"
-DATABASE_FILE = Path(__file__).resolve().parent.parent / "orwa_lowes.sqlite"
+DATABASE_FILE = Path(os.getenv("CHEAPSKATER_DB_PATH") or (BASE_PATH.parent / "orwa_lowes.sqlite")).resolve()
 METRICS_SUMMARY_FILE = Path(os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json"))
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
 HEALTH_MAX_STALE_MINUTES = float(os.getenv("DASHBOARD_HEALTH_MAX_STALE_MINUTES", "120"))
@@ -45,6 +45,43 @@ session_factory = make_session(engine)
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app = FastAPI(title="CheapSkater Clearance Dashboard")
+
+class IngestDeal(BaseModel):
+    store_id: str
+    store_name: str
+    category_url: str | None = None
+    product_url: str
+    title: str
+    price: float
+    was_price: float
+    pct_off: float
+    found_at: str
+
+class IngestRequest(BaseModel):
+    source: str
+    deals: list[IngestDeal]
+
+def _extract_sku(url: str) -> str | None:
+    if not url:
+        return None
+    # Common patterns: /pd/name/SKU or /product/name/SKU
+    # specific lowes pattern often ends in digits
+    match = re.search(r"/(\d{4,20})(?:$|[?#])", url)
+    if match:
+        return match.group(1)
+    return None
+
+def _extract_category_name(url: str | None) -> str:
+    if not url:
+        return "Uncategorized"
+    try:
+        path = urlparse(url).path
+        if path.endswith("/"):
+            path = path[:-1]
+        return path.split("/")[-1].replace("-", " ").title()
+    except Exception:
+        return "Uncategorized"
+
 SESSION_SECRET = os.getenv("CHEAPSKATER_SESSION_SECRET", "cheapskater-session-secret")
 SESSION_MAX_AGE = int(os.getenv("CHEAPSKATER_SESSION_MAX_AGE", str(60 * 60 * 24 * 30)))
 app.add_middleware(SimpleSessionMiddleware, secret_key=SESSION_SECRET, max_age=SESSION_MAX_AGE)
@@ -1565,6 +1602,110 @@ def api_stats(session: Session = Depends(get_session)) -> JSONResponse:
 
     payload = _cache_stats(session)
     return JSONResponse(content=payload)
+
+
+@app.post("/api/ingest")
+def ingest_data(
+    payload: IngestRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest deals from external workers (e.g., Gloorbot)."""
+
+    if not payload.deals:
+        return {"ok": True, "count": 0}
+
+    upserted_count = 0
+    skipped_count = 0
+
+    known_stores = LOWES_STORES_WA_OR
+
+    for deal in payload.deals:
+        sku = _extract_sku(deal.product_url)
+        if not sku:
+            skipped_count += 1
+            continue
+
+        store_id = _normalize_store_number(deal.store_id)
+        
+        # Resolve store details
+        store_details = _canonical_store_details(store_id)
+        store_zip = "00000"
+        store_city = None
+        store_state = None
+        
+        if store_details:
+             store_zip = store_details.get("zip") or "00000"
+             store_city = store_details.get("city")
+             store_state = store_details.get("state")
+        
+        # Ensure Store exists
+        repo.upsert_store(
+            session, 
+            store_id=store_id, 
+            name=deal.store_name, 
+            zip_code=store_zip,
+            city=store_city,
+            state=store_state
+        )
+
+        category_name = _extract_category_name(deal.category_url)
+
+        # Ensure Item exists
+        repo.upsert_item(
+             session,
+             sku=sku,
+             retailer="lowes",
+             title=deal.title,
+             category=category_name,
+             product_url=deal.product_url,
+             image_url=None # Gloorbot doesn't send image URL yet
+        )
+
+        ts = datetime.fromisoformat(deal.found_at.replace("Z", "+00:00"))
+
+        # Add Observation
+        observation = Observation(
+            ts_utc=ts,
+            retailer="lowes",
+            store_id=store_id,
+            store_name=deal.store_name,
+            zip=store_zip,
+            sku=sku,
+            title=deal.title,
+            category=category_name,
+            price=deal.price,
+            price_was=deal.was_price,
+            pct_off=deal.pct_off,
+            availability=None, # Gloorbot doesn't send availability yet
+            product_url=deal.product_url,
+            image_url=None,
+            clearance=True # Assuming pushed deals are clearance
+        )
+        repo.insert_observation(session, observation)
+
+        # Update History
+        repo.update_price_history(
+            session,
+            retailer="lowes",
+            store_id=store_id,
+            sku=sku,
+            title=deal.title,
+            category=category_name,
+            ts_utc=ts,
+            price=deal.price,
+            price_was=deal.was_price,
+            pct_off=deal.pct_off,
+            availability=None,
+            product_url=deal.product_url,
+            image_url=None,
+            clearance=True
+        )
+        upserted_count += 1
+
+    session.commit()
+    LOGGER.info(f"Ingested {upserted_count} deals from {payload.source} (skipped {skipped_count})")
+    return {"ok": True, "count": upserted_count, "skipped": skipped_count}
+
 
 
 if __name__ == "__main__":
