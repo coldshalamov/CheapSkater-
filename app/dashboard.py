@@ -27,6 +27,7 @@ from app.middleware.simple_session import SimpleSessionMiddleware
 from app.lowes_stores_wa_or import LOWES_STORES_WA_OR
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session
+from app.storage.models_sql import Observation
 
 
 LOGGER = get_logger(__name__)
