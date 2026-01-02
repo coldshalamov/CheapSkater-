@@ -47,6 +47,10 @@ session_factory = make_session(engine)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app = FastAPI(title="CheapSkater Clearance Dashboard")
 
+# Register ingest API router
+from app.ingest import router as ingest_router
+app.include_router(ingest_router)
+
 class IngestDeal(BaseModel):
     store_id: str
     store_name: str
