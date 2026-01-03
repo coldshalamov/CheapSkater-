@@ -1,8 +1,8 @@
-"""
+r"""
 Cheapskater Ingest API - Receives deals from Gloorbot coordinator.
 
 INSTALLATION:
-1. Copy this file to: C:\Users\User\Documents\GitHub\Cheapskater_FULL_20251204_132158\app\ingest.py
+1. Copy this file to: C:/Users/User/Documents/GitHub/Cheapskater_FULL_20251204_132158/app/ingest.py
 
 2. Edit app/dashboard.py and add near the top imports:
    from app.ingest import router as ingest_router
