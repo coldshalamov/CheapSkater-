@@ -115,7 +115,7 @@
             <div class="product-card__header">
                 <div class="product-card__image">
                     {% if group.image_url %}
-                    <img src="{{ group.image_url }}" alt="{{ group.title }}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;">
+                    <img src="{{ group.image_url }}" alt="{{ group.title }}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'image-placeholder',textContent:'No Image'}));">
                     {% else %}
                     <div class="image-placeholder">No Image</div>
                     {% endif %}
@@ -548,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="product-card__image">
           ${
             group.image_url
-              ? `<img src="${group.image_url}" alt="${group.title}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;">`
+              ? `<img src="${group.image_url}" alt="${group.title}" loading="lazy" width="70" height="70" style="max-width:70px;max-height:70px;width:auto;height:auto;object-fit:contain;" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'image-placeholder',textContent:'No Image'}));">`
               : '<div class="image-placeholder">No Image</div>'
           }
         </div>

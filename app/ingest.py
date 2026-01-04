@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.storage.db import get_engine, init_db, make_session
+from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Store
 from app.storage import repo
 
@@ -41,30 +40,9 @@ INGEST_API_KEY = os.getenv("CHEAPSKATER_INGEST_API_KEY", "")
 
 # Database setup (match dashboard.py)
 BASE_PATH = Path(__file__).resolve().parent
-DATABASE_FILE = Path(os.getenv("CHEAPSKATER_DB_PATH") or (BASE_PATH.parent / "orwa_lowes.sqlite")).resolve()
-FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()
+FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()     
+DATABASE_FILE = resolve_database_file(fallback=FALLBACK_DATABASE_FILE)
 DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
-
-
-def _maybe_migrate_db_file() -> None:
-    # Only run when an explicit override is set.
-    if not os.getenv("CHEAPSKATER_DB_PATH"):
-        return
-    if DATABASE_FILE == FALLBACK_DATABASE_FILE:
-        return
-    if DATABASE_FILE.exists():
-        return
-    if not FALLBACK_DATABASE_FILE.exists():
-        return
-    try:
-        DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(FALLBACK_DATABASE_FILE, DATABASE_FILE)
-        LOGGER.info("Migrated DB file %s -> %s", str(FALLBACK_DATABASE_FILE), str(DATABASE_FILE))
-    except Exception as exc:
-        LOGGER.warning("DB migration skipped (%s)", exc)
-
-
-_maybe_migrate_db_file()
 
 _engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
 init_db(_engine)

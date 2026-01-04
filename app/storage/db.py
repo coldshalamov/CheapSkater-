@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import sqlite3
+from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
@@ -12,6 +16,43 @@ from .models_sql import Base
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def resolve_database_file(*, fallback: Path) -> Path:
+    """Resolve the SQLite database file path.
+
+    Uses CHEAPSKATER_DB_PATH when set, but falls back safely if the override
+    path is not writable in the current environment (for example, `/var/data`
+    before a Render disk is attached).
+
+    If CHEAPSKATER_DB_PATH points to a new location and a fallback DB exists,
+    it attempts a one-time copy so switching paths doesn't look like a data wipe.
+    """
+
+    fallback_resolved = fallback.resolve()
+    override = (os.getenv("CHEAPSKATER_DB_PATH") or "").strip()
+    if not override:
+        return fallback_resolved
+
+    candidate = Path(override).resolve()
+    if candidate == fallback_resolved:
+        return fallback_resolved
+
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        if not candidate.exists() and fallback_resolved.exists():
+            shutil.copy2(fallback_resolved, candidate)
+        conn = sqlite3.connect(str(candidate))
+        conn.close()
+        return candidate
+    except Exception as exc:
+        LOGGER.warning(
+            "CHEAPSKATER_DB_PATH=%s unusable (%s); falling back to %s",
+            override,
+            exc,
+            str(fallback_resolved),
+        )
+        return fallback_resolved
 
 
 def _apply_sqlite_pragmas(engine: Engine, timeout_value: float) -> None:
