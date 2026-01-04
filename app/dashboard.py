@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -35,9 +36,38 @@ BASE_PATH = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_PATH / "templates"
 STATIC_DIR = BASE_PATH / "static"
 DATABASE_FILE = Path(os.getenv("CHEAPSKATER_DB_PATH") or (BASE_PATH.parent / "orwa_lowes.sqlite")).resolve()
+FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()
 METRICS_SUMMARY_FILE = Path(os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json"))
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
 HEALTH_MAX_STALE_MINUTES = float(os.getenv("DASHBOARD_HEALTH_MAX_STALE_MINUTES", "120"))
+
+def _maybe_migrate_db_file() -> None:
+    """Best-effort DB migration when switching CHEAPSKATER_DB_PATH.
+
+    Render often starts with DB at `/opt/render/project/src/orwa_lowes.sqlite`.
+    When a persistent disk is later attached at `/var/data` and CHEAPSKATER_DB_PATH
+    is updated to `/var/data/orwa_lowes.sqlite`, we copy the existing DB once so
+    a config change doesn't look like a data wipe.
+    """
+
+    # Only run when an explicit override is set.
+    if not os.getenv("CHEAPSKATER_DB_PATH"):
+        return
+    if DATABASE_FILE == FALLBACK_DATABASE_FILE:
+        return
+    if DATABASE_FILE.exists():
+        return
+    if not FALLBACK_DATABASE_FILE.exists():
+        return
+    try:
+        DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(FALLBACK_DATABASE_FILE, DATABASE_FILE)
+        LOGGER.info("Migrated DB file %s -> %s", str(FALLBACK_DATABASE_FILE), str(DATABASE_FILE))
+    except Exception as exc:
+        LOGGER.warning("DB migration skipped (%s)", exc)
+
+
+_maybe_migrate_db_file()
 
 DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
 engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
