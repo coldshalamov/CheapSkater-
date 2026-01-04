@@ -188,7 +188,10 @@ def ingest_deals(
 
             accepted += 1
 
-        except Exception:
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Failed to ingest deal for {deal.store_id}: {e}")
+            traceback.print_exc()
             errors += 1
             continue
 
