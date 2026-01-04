@@ -57,6 +57,7 @@ class IngestDeal(BaseModel):
     category_url: str | None = None
     product_url: str
     title: str
+    image_url: str | None = None
     price: float
     was_price: float
     pct_off: float
@@ -1655,6 +1656,10 @@ def ingest_data(
 
         category_name = _extract_category_name(deal.category_url)
 
+        image_url = deal.image_url
+        if isinstance(image_url, str):
+            image_url = image_url.strip() or None
+
         # Ensure Item exists
         repo.upsert_item(
              session,
@@ -1663,7 +1668,7 @@ def ingest_data(
              title=deal.title,
              category=category_name,
              product_url=deal.product_url,
-             image_url=None # Gloorbot doesn't send image URL yet
+             image_url=image_url
         )
 
         ts = datetime.fromisoformat(deal.found_at.replace("Z", "+00:00"))
@@ -1683,7 +1688,7 @@ def ingest_data(
             pct_off=deal.pct_off,
             availability=None, # Gloorbot doesn't send availability yet
             product_url=deal.product_url,
-            image_url=None,
+            image_url=image_url,
             clearance=True # Assuming pushed deals are clearance
         )
         repo.insert_observation(session, observation)
@@ -1702,7 +1707,7 @@ def ingest_data(
             pct_off=deal.pct_off,
             availability=None,
             product_url=deal.product_url,
-            image_url=None,
+            image_url=image_url,
             clearance=True
         )
         upserted_count += 1

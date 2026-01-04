@@ -60,6 +60,7 @@ class GloorbotDeal(BaseModel):
     category_url: str | None = None
     product_url: str
     title: str
+    image_url: str | None = None
     price: float
     was_price: float
     pct_off: float
@@ -201,7 +202,7 @@ def ingest_deals(
                 pct_off=deal.pct_off,
                 availability="In Stock",
                 product_url=deal.product_url,
-                image_url=None,
+                image_url=deal.image_url,
                 clearance=True,
             )
 
