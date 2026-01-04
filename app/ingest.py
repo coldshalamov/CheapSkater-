@@ -26,19 +26,24 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.storage.db import get_engine, make_session
+from app.logging_config import get_logger
+from app.storage.db import get_engine, init_db, make_session
 from app.storage.models_sql import Store
 from app.storage import repo
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
+LOGGER = get_logger(__name__)
+
 # API key for authentication (set via environment variable)
 INGEST_API_KEY = os.getenv("CHEAPSKATER_INGEST_API_KEY", "")
 
-# Database setup (same pattern as dashboard.py)
-DATABASE_FILE = Path(__file__).resolve().parent.parent / "orwa_lowes.sqlite"
+# Database setup (match dashboard.py)
+BASE_PATH = Path(__file__).resolve().parent
+DATABASE_FILE = Path(os.getenv("CHEAPSKATER_DB_PATH") or (BASE_PATH.parent / "orwa_lowes.sqlite")).resolve()
 DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
 _engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
+init_db(_engine)
 _session_factory = make_session(_engine)
 
 
@@ -52,7 +57,7 @@ class GloorbotDeal(BaseModel):
     """Deal format from Gloorbot coordinator."""
     store_id: str
     store_name: str
-    category_url: str
+    category_url: str | None = None
     product_url: str
     title: str
     price: float
@@ -64,6 +69,8 @@ class GloorbotDeal(BaseModel):
 class IngestRequest(BaseModel):
     """Batch of deals from Gloorbot."""
     source: str = Field(default="gloorbot", description="Source system identifier")
+    batch_id: str | None = None
+    client_id: str | None = None
     deals: list[GloorbotDeal]
 
 
@@ -129,6 +136,8 @@ def ingest_deals(
     request: IngestRequest,
     session: Session = Depends(get_session),
     x_api_key: str = Header(default="", alias="X-API-Key"),
+    x_gloorbot_batch_id: str = Header(default="", alias="X-Gloorbot-Batch-Id"),
+    x_gloorbot_client_id: str = Header(default="", alias="X-Gloorbot-Client-Id"),
 ):
     """Receive deals from Gloorbot and insert into Cheapskater database."""
 
@@ -136,7 +145,16 @@ def ingest_deals(
     if INGEST_API_KEY and x_api_key != INGEST_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    print(f"[INGEST] Received {len(request.deals)} deals from {request.source}")
+    batch_id = request.batch_id or x_gloorbot_batch_id or ""
+    client_id = request.client_id or x_gloorbot_client_id or ""
+    LOGGER.info(
+        "[INGEST] batch_id=%s client_id=%s source=%s deals=%s db=%s",
+        batch_id,
+        client_id,
+        request.source,
+        len(request.deals),
+        str(DATABASE_FILE),
+    )
     accepted = 0
     errors = 0
 
@@ -147,7 +165,7 @@ def ingest_deals(
                 errors += 1
                 continue
 
-            category = extract_category_from_url(deal.category_url)
+            category = extract_category_from_url(deal.category_url or "")
             store_info = parse_store_info(deal.store_id, deal.store_name)
 
             # Parse timestamp
@@ -190,14 +208,19 @@ def ingest_deals(
             accepted += 1
 
         except Exception as e:
-            import traceback
-            print(f"[ERROR] Failed to ingest deal for {deal.store_id}: {e}")
-            traceback.print_exc()
+            LOGGER.exception("[INGEST] batch_id=%s client_id=%s error=%s", batch_id, client_id, e)
             errors += 1
             continue
 
     session.commit()
 
+    LOGGER.info(
+        "[INGEST] batch_id=%s client_id=%s done accepted=%s errors=%s",
+        batch_id,
+        client_id,
+        accepted,
+        errors,
+    )
     return IngestResponse(
         ok=True,
         accepted=accepted,
@@ -209,4 +232,10 @@ def ingest_deals(
 @router.get("/health")
 def ingest_health():
     """Health check for the ingest API."""
-    return {"ok": True, "configured": bool(INGEST_API_KEY)}
+    db_exists = DATABASE_FILE.exists()
+    return {
+        "ok": True,
+        "configured": bool(INGEST_API_KEY),
+        "db_path": str(DATABASE_FILE),
+        "db_exists": db_exists,
+    }
