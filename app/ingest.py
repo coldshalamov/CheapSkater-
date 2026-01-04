@@ -136,6 +136,7 @@ def ingest_deals(
     if INGEST_API_KEY and x_api_key != INGEST_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    print(f"[INGEST] Received {len(request.deals)} deals from {request.source}")
     accepted = 0
     errors = 0
 
