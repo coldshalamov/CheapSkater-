@@ -9,6 +9,8 @@ services:
         value: /var/data/orwa_lowes.sqlite
       - key: CHEAPSKATER_SESSION_SECRET
         generateValue: true
+      - key: CHEAPSKATER_INGEST_API_KEY
+        value: JZhdARITo9ujVU2OcCaiqkx6ktB7SNh28ouQXz6U2f0=
       - key: PORT
         value: 8000
     disk:
