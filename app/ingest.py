@@ -242,3 +242,82 @@ def ingest_health():
         "db_path": str(DATABASE_FILE),
         "db_exists": db_exists,
     }
+
+
+@router.post("/cleanup-db")
+def cleanup_database(
+    session: Session = Depends(get_session),
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+):
+    """
+    Admin endpoint to clean up database.
+    Removes:
+    1. Rows with absurd prices (>= $10,000)
+    2. Rows with implausible savings (> $5,000)
+    3. Rows from today (test/development data)
+    """
+    # Validate API key if configured
+    if INGEST_API_KEY and x_api_key != INGEST_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        # Count rows before deletion
+        from sqlalchemy import text
+
+        conn = session.connection()
+
+        # Preview queries
+        absurd = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE price_was >= 10000")).scalar()
+        implausible = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE (price_was - price) > 5000")).scalar()
+        todays = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE date(ts_utc) = date('now')")).scalar()
+        before_total = conn.execute(text("SELECT COUNT(*) FROM store_price_history")).scalar()
+
+        LOGGER.info("[CLEANUP] Preview - absurd_prices=%d implausible_savings=%d todays_data=%d total=%d",
+                   absurd, implausible, todays, before_total)
+
+        # Execute deletions
+        conn.execute(text("DELETE FROM store_price_history WHERE price_was >= 10000"))
+        deleted_absurd = conn.rowcount
+
+        conn.execute(text("DELETE FROM store_price_history WHERE (price_was - price) > 5000"))
+        deleted_implausible = conn.rowcount
+
+        conn.execute(text("DELETE FROM store_price_history WHERE date(ts_utc) = date('now')"))
+        deleted_todays = conn.rowcount
+
+        # Vacuum to reclaim space
+        conn.execute(text("VACUUM"))
+
+        # Final count
+        after_total = conn.execute(text("SELECT COUNT(*) FROM store_price_history")).scalar()
+
+        session.commit()
+
+        total_deleted = deleted_absurd + deleted_implausible + deleted_todays
+
+        LOGGER.info("[CLEANUP] Complete - deleted_absurd=%d deleted_implausible=%d deleted_todays=%d total_deleted=%d before=%d after=%d",
+                   deleted_absurd, deleted_implausible, deleted_todays, total_deleted, before_total, after_total)
+
+        return {
+            "ok": True,
+            "message": "Database cleanup completed",
+            "preview": {
+                "absurd_prices": absurd,
+                "implausible_savings": implausible,
+                "todays_data": todays,
+                "total_rows_before": before_total,
+            },
+            "deleted": {
+                "absurd_prices": deleted_absurd,
+                "implausible_savings": deleted_implausible,
+                "todays_data": deleted_todays,
+                "total_deleted": total_deleted,
+            },
+            "final": {
+                "total_rows_after": after_total,
+                "rows_reclaimed": before_total - after_total,
+            }
+        }
+    except Exception as e:
+        LOGGER.exception("[CLEANUP] Error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
