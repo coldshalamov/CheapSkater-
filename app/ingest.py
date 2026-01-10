@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
+from app.normalizers import extract_category_name
 from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Store
 from app.storage import repo
@@ -60,6 +61,7 @@ class GloorbotDeal(BaseModel):
     store_id: str
     store_name: str
     category_url: str | None = None
+    category_name: str | None = None
     product_url: str
     title: str
     image_url: str | None = None
@@ -116,6 +118,13 @@ def extract_category_from_url(category_url: str) -> str:
     return "Clearance"
 
 
+def _resolve_category(deal: GloorbotDeal) -> str:
+    preferred = (deal.category_name or "").strip()
+    if preferred:
+        return preferred
+    return extract_category_name(deal.category_url)
+
+
 def parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
     """Parse store_name to extract city and state.
 
@@ -168,8 +177,8 @@ def ingest_deals(
                 errors += 1
                 continue
 
-            category = extract_category_from_url(deal.category_url or "")
-            store_info = parse_store_info(deal.store_id, deal.store_name)
+            category = _resolve_category(deal)
+            store_info = parse_store_info(deal.store_id, deal.store_name)       
 
             # Parse timestamp
             try:

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.middleware.simple_session import SimpleSessionMiddleware
 from app.lowes_stores_wa_or import LOWES_STORES_WA_OR
+from app.normalizers import extract_category_name
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Observation
@@ -56,6 +57,7 @@ class IngestDeal(BaseModel):
     store_id: str
     store_name: str
     category_url: str | None = None
+    category_name: str | None = None
     product_url: str
     title: str
     image_url: str | None = None
@@ -79,15 +81,7 @@ def _extract_sku(url: str) -> str | None:
     return None
 
 def _extract_category_name(url: str | None) -> str:
-    if not url:
-        return "Uncategorized"
-    try:
-        path = urlparse(url).path
-        if path.endswith("/"):
-            path = path[:-1]
-        return path.split("/")[-1].replace("-", " ").title()
-    except Exception:
-        return "Uncategorized"
+    return extract_category_name(url)
 
 SESSION_SECRET = os.getenv("CHEAPSKATER_SESSION_SECRET", "cheapskater-session-secret")
 SESSION_MAX_AGE = int(os.getenv("CHEAPSKATER_SESSION_MAX_AGE", str(60 * 60 * 24 * 30)))
@@ -1603,6 +1597,33 @@ def api_clearance(
     )
 
 
+@app.get("/api/categories")
+def api_categories(session: Session = Depends(get_session)) -> list[str]:
+    """Return a sorted list of distinct clearance categories."""
+
+    return repo.list_distinct_categories(session)
+
+
+@app.get("/api/deals")
+def api_deals(
+    category: str | None = Query(None, description="Optional category filter."),
+    session: Session = Depends(get_session),
+) -> JSONResponse:
+    """Return clearance deals as a simple list (category-filterable)."""
+
+    normalized_category = (category or "").strip() or None
+    raw_items = _select_items(session, scope="all", state=None, category=normalized_category)
+    prepared_items = _prepare_listings(raw_items)
+    payload = [_serialize_observation(item) for item in prepared_items]
+    return JSONResponse(
+        content={
+            "items": payload,
+            "count": len(payload),
+            "category": normalized_category,
+        }
+    )
+
+
 @app.get("/api/stats")
 def api_stats(session: Session = Depends(get_session)) -> JSONResponse:
     """Return aggregate stats for dashboard clients."""
@@ -1655,7 +1676,8 @@ def ingest_data(
             state=store_state
         )
 
-        category_name = _extract_category_name(deal.category_url)
+        preferred_category = (deal.category_name or "").strip()
+        category_name = preferred_category or _extract_category_name(deal.category_url)
 
         image_url = deal.image_url
         if isinstance(image_url, str):

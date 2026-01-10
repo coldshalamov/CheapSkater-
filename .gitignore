@@ -4,6 +4,8 @@
 
 # Python cache directories
 __pycache__/
+.pytest_cache/
+.pytest_tmp/
 
 # Local databases
 # (track SQLite so Render gets the populated dashboard data)

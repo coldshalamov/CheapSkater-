@@ -105,6 +105,143 @@ def test_api_clearance_filters_state(tmp_path) -> None:
     assert payload["items"][0]["store_id"] == "store-wa"
 
 
+def test_api_categories_returns_unique_sorted(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+        store = Store(id="store-cat", name="Seattle Lowe's", city="Seattle", state="WA", zip="98101")
+        session.add(store)
+        session.flush()
+
+        now = datetime.now(timezone.utc)
+        obs_rows = [
+            Observation(
+                ts_utc=now,
+                store_id=store.id,
+                store_name=store.name,
+                zip=store.zip,
+                sku="sku-fans",
+                retailer="lowes",
+                title="Portable Fan",
+                category="Portable Fans",
+                product_url="https://example.com/fans",
+                image_url=None,
+                price=25.0,
+                price_was=50.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+            Observation(
+                ts_utc=now,
+                store_id=store.id,
+                store_name=store.name,
+                zip=store.zip,
+                sku="sku-parts",
+                retailer="lowes",
+                title="Dishwasher Part",
+                category="Dishwasher Parts",
+                product_url="https://example.com/parts",
+                image_url=None,
+                price=10.0,
+                price_was=20.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+        ]
+        session.add_all(obs_rows)
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    categories = response.json()
+    assert categories == ["Dishwasher Parts", "Portable Fans"]
+
+
+def test_api_deals_filters_by_category(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+        store = Store(id="store-deals", name="Seattle Lowe's", city="Seattle", state="WA", zip="98101")
+        session.add(store)
+        session.flush()
+
+        now = datetime.now(timezone.utc)
+        obs_rows = [
+            Observation(
+                ts_utc=now,
+                store_id=store.id,
+                store_name=store.name,
+                zip=store.zip,
+                sku="sku-keep",
+                retailer="lowes",
+                title="Portable Fan",
+                category="Portable Fans",
+                product_url="https://example.com/fans",
+                image_url=None,
+                price=25.0,
+                price_was=50.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+            Observation(
+                ts_utc=now,
+                store_id=store.id,
+                store_name=store.name,
+                zip=store.zip,
+                sku="sku-drop",
+                retailer="lowes",
+                title="Dishwasher Part",
+                category="Dishwasher Parts",
+                product_url="https://example.com/parts",
+                image_url=None,
+                price=10.0,
+                price_was=20.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+        ]
+        session.add_all(obs_rows)
+        session.commit()
+
+        for obs in obs_rows:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+            )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/deals", params={"category": "Portable Fans"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["category"] == "Portable Fans"
+    assert payload["items"][0]["category"] == "Portable Fans"
+
+
 def test_api_sort_orders(tmp_path) -> None:
     with session_factory() as session:
         session.execute(delete(Observation))
