@@ -102,14 +102,33 @@
         <span class="deal-card__category">Clearance</span>
         {% endif %}
         <h3 class="deal-card__title">
-          <a href="{{ group.product_url }}" target="_blank">{{ group.title }}</a>
+          <a href="{{ group.best_product_url }}" target="_blank">{{ group.title }}</a>
         </h3>
         <div class="deal-card__pricing">
           <span class="deal-card__price">${{ group.min_price }}</span>
           <span class="deal-card__was-price">${{ group.min_price_was }}</span>
         </div>
         <div style="margin-top: 1rem; font-size: 0.875rem; color: var(--text-secondary);">
-          {{ group.stores|length }} stores available
+          {% if group.stores|length > 1 %}
+          <select class="form-select" style="width: 100%; font-size: 0.85rem; padding: 0.25rem;">
+            {% for store in group.stores %}
+            <option>
+              {{ store.store_label }} - {{ store.stock_label or 'Unknown stock' }}
+            </option>
+            {% endfor %}
+          </select>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+            {{ group.stores|length }} stores available
+          </div>
+          {% else %}
+          {% set store = group.stores[0] %}
+          <div style="font-weight: 500;">
+            {{ store.store_label }}
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">
+            {{ store.stock_label or 'Stock unknown' }}
+          </div>
+          {% endif %}
         </div>
       </div>
       <div class="deal-card__footer">
