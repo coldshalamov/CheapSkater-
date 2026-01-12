@@ -8,8 +8,10 @@
 :root {
     /* Core Colors */
     --bg-primary: #ffffff;
-    --bg-secondary: #f0f4f8; /* Softer blue-grey */
-    --accent-blue: #2563EB;   /* Vibrant Blue */
+    --bg-secondary: #f0f4f8;
+    /* Softer blue-grey */
+    --accent-blue: #2563EB;
+    /* Vibrant Blue */
     --accent-blue-dark: #1E40AF;
     --accent-blue-light: #60A5FA;
     --accent-blue-soft: rgba(37, 99, 235, 0.12);
@@ -17,26 +19,31 @@
     /* Functional Colors */
     --success: #10B981;
     --success-bg: #D1FAE5;
-    --danger: #EF4444; 
+    --danger: #EF4444;
     --danger-bg: #FEE2E2;
     --warning: #F59E0B;
-    --text-primary: #1E293B;  /* Slate 800 */
-    --text-secondary: #475569; /* Slate 600 */
-    --text-muted: #94A3B8;    /* Slate 400 */
+    --text-primary: #1E293B;
+    /* Slate 800 */
+    --text-secondary: #475569;
+    /* Slate 600 */
+    --text-muted: #94A3B8;
+    /* Slate 400 */
 
     /* Effects */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    
+
     --card-bg: rgba(255, 255, 255, 0.9);
     --card-border: 1px solid rgba(255, 255, 255, 0.5);
     --glass-blur: blur(12px);
 
     /* Typography */
-    --font-heading: 'Fredoka', system-ui, sans-serif; /* Playful headers */
-    --font-body: 'Nunito', system-ui, sans-serif;    /* Friendly body text */
+    --font-heading: 'Fredoka', system-ui, sans-serif;
+    /* Playful headers */
+    --font-body: 'Nunito', system-ui, sans-serif;
+    /* Friendly body text */
 
     /* Spacing */
     --container-max: 1200px;
@@ -52,7 +59,9 @@
    BASE
    ═══════════════════════════════════════════════════════════════════════════ */
 
-* { box-sizing: border-box; }
+* {
+    box-sizing: border-box;
+}
 
 body {
     margin: 0;
@@ -68,7 +77,12 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
     font-family: var(--font-heading);
     margin: 0;
     line-height: 1.2;
@@ -80,10 +94,14 @@ a {
     font-weight: 700;
     transition: all 0.2s ease;
 }
-a:hover { color: var(--accent-blue-dark); }
+
+a:hover {
+    color: var(--accent-blue-dark);
+}
 
 button {
-    font-family: var(--font-heading); /* Buttons get the playful font */
+    font-family: var(--font-heading);
+    /* Buttons get the playful font */
     cursor: pointer;
 }
 
@@ -120,7 +138,8 @@ button {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    position: relative; /* Context for absolute logo */
+    position: relative;
+    /* Context for absolute logo */
     max-width: var(--container-max);
     margin: 0 auto;
     padding: 0 24px;
@@ -128,19 +147,21 @@ button {
 
 /* THE PEEKING LOGO */
 .brand-link {
-    display: flex; /* Kept for semantics, but image is absolute */
+    display: flex;
+    /* Kept for semantics, but image is absolute */
 }
 
 .brand-logo {
     position: absolute;
-    top: 10px; /* Slight offset from top */
+    top: 10px;
+    /* Slight offset from top */
     left: 24px;
-    height: 110px; /* Big! 15% larger as requested */
+    height: 110px;
+    /* Big! 15% larger as requested */
     width: 110px;
     object-fit: contain;
     background: white;
     border-radius: 50%;
-    border: 5px solid white;
     box-shadow: var(--shadow-lg);
     z-index: 50;
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -151,15 +172,19 @@ button {
 }
 
 .brand-name {
-    display: none; /* Hide text, logo is iconic enough */
+    display: none;
+    /* Hide text, logo is iconic enough */
 }
 
 /* Navigation */
 .nav-links {
     display: flex;
-    gap: 8px; /* Tight gap for pill buttons */
-    margin-left: 120px; /* Make room for the big logo */
-    z-index: 20; /* Above pattern */
+    gap: 8px;
+    /* Tight gap for pill buttons */
+    margin-left: 120px;
+    /* Make room for the big logo */
+    z-index: 20;
+    /* Above pattern */
 }
 
 .nav-link {
@@ -186,21 +211,27 @@ button {
 @media (max-width: 768px) {
     .brand-logo {
         position: relative;
-        top: 0; left: 0;
-        height: 60px; width: 60px;
+        top: 0;
+        left: 0;
+        height: 60px;
+        width: 60px;
         margin-right: 12px;
         border-width: 3px;
     }
+
     .nav-links {
         margin-left: 0;
         overflow-x: auto;
-        padding-bottom: 4px; /* Scrollbar room */
+        padding-bottom: 4px;
+        /* Scrollbar room */
     }
+
     .site-header {
         height: auto;
         padding: 12px 0;
         border-radius: 0 0 16px 16px;
     }
+
     .site-header .container {
         flex-direction: column;
         align-items: flex-start;
@@ -215,7 +246,7 @@ button {
 .site-main {
     padding: 40px 0;
     /* Pushes content down so it doesn't hide behind the peeking logo space */
-    margin-top: 20px; 
+    margin-top: 20px;
 }
 
 .container {
@@ -241,14 +272,21 @@ button {
     transition: transform 0.1s;
     text-decoration: none;
 }
-.btn:hover { transform: translateY(-1px); }
-.btn:active { transform: translateY(1px); }
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
 
 .btn-primary {
     background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-blue-light) 100%);
     color: white;
     box-shadow: 0 4px 6px rgba(37, 99, 235, 0.25);
 }
+
 .btn-primary:hover {
     box-shadow: 0 6px 10px rgba(37, 99, 235, 0.35);
     color: white;
@@ -257,9 +295,10 @@ button {
 .btn-secondary {
     background: white;
     color: var(--accent-blue);
-    border: 1px solid rgba(0,0,0,0.05);
+    border: 1px solid rgba(0, 0, 0, 0.05);
     box-shadow: var(--shadow-sm);
 }
+
 .btn-secondary:hover {
     background: var(--bg-secondary);
     color: var(--accent-blue-dark);
@@ -293,7 +332,8 @@ button {
 
 /* Card Image Area */
 .deal-card__image {
-    aspect-ratio: 1.1; /* Slightly wider */
+    aspect-ratio: 1.1;
+    /* Slightly wider */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -348,6 +388,7 @@ button {
     border: none;
     transition: all 0.2s;
 }
+
 .category-chip:hover {
     background: var(--accent-blue-soft);
     color: var(--accent-blue);
@@ -357,13 +398,15 @@ button {
     font-size: 1.1rem;
     font-weight: 700;
     margin-bottom: 12px;
-    height: 3.2em; /* ~2 lines */
+    height: 3.2em;
+    /* ~2 lines */
     overflow: hidden;
 }
 
 .deal-card__title a {
     color: var(--text-primary);
 }
+
 .deal-card__title a:hover {
     color: var(--accent-blue);
 }
@@ -393,11 +436,14 @@ button {
 /* Card Footer */
 .deal-card__footer {
     padding: 16px 20px;
-    background: transparent; /* Seamless */
+    background: transparent;
+    /* Seamless */
     border-top: 1px solid var(--bg-secondary);
 }
 
-.btn-block { width: 100%; }
+.btn-block {
+    width: 100%;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    FILTERS BAR
@@ -425,7 +471,8 @@ button {
     letter-spacing: 0.5px;
 }
 
-select, input[type="search"] {
+select,
+input[type="search"] {
     width: 100%;
     padding: 10px 14px;
     border: 2px solid var(--bg-secondary);
@@ -438,7 +485,8 @@ select, input[type="search"] {
     min-width: 140px;
 }
 
-select:focus, input[type="search"]:focus {
+select:focus,
+input[type="search"]:focus {
     outline: none;
     border-color: var(--accent-blue-light);
     background: white;
@@ -467,7 +515,9 @@ select:focus, input[type="search"]:focus {
     margin-bottom: 24px;
 }
 
-.form-input { margin-bottom: 16px; }
+.form-input {
+    margin-bottom: 16px;
+}
 
 /* Dashboard Header & Text */
 .dashboard-header h1 {
