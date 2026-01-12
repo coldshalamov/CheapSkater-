@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Create Account - GloorBot{% endblock %}
+{% block content %}
+<section class="auth-page">
+    <div class="auth-card">
+        <div class="auth-header">
+            <h1 class="auth-title">Get Started</h1>
+            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Join the GloorBot treasure hunt</p>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-error">
+            <svg style="width: 20px; height: 20px; flex-shrink: 0;" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clip-rule="evenodd" />
+            </svg>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <form method="post" action="/auth/register" class="auth-form">
+            <div class="form-group">
+                <label for="display_name" class="form-label">Display Name <span
+                        style="font-weight: 400; color: var(--text-muted);">(optional)</span></label>
+                <input type="text" id="display_name" name="display_name" autocomplete="name"
+                    placeholder="How should we call you?" class="form-input">
+            </div>
+
+            <div class="form-group">
+                <label for="email" class="form-label">Email Address</label>
+                <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com"
+                    class="form-input">
+            </div>
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password</label>
+                <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password"
+                    placeholder="Minimum 8 characters" class="form-input">
+            </div>
+
+            <div class="form-group">
+                <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+                    <input type="checkbox" name="terms" required style="margin-top: 3px;">
+                    <span style="color: var(--text-secondary);">I agree to the <a href="/terms"
+                            style="color: var(--accent-blue);">Terms of Service</a></span>
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg">Create Account</button>
+        </form>
+
+        <div style="margin-top: 2rem; text-align: center; font-size: 0.9rem; color: var(--text-muted);">
+            Already have an account? <a href="/auth/login" style="font-weight: 600; color: var(--accent-blue);">Sign
+                in</a>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Pricing - GloorBot{% endblock %}
+{% block content %}
+<section class="pricing">
+    <div class="pricing-header">
+        <h1>Plans & Pricing</h1>
+        <p style="color: var(--text-secondary); font-size: 1.25rem;">Unlock the full power of GloorBot for serious deal
+            hunting.</p>
+    </div>
+
+    <div class="pricing-grid">
+        <!-- Free Tier -->
+        <div class="pricing-card">
+            <div class="plan-header">
+                <h2 class="plan-name">Free</h2>
+                <div class="plan-price">
+                    <span class="price-amount">$0</span>
+                    <span style="color: var(--text-muted);">/mo</span>
+                </div>
+            </div>
+            <ul class="plan-features">
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    View deals from last 24h
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Basic filters
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Save up to 5 deals
+                </li>
+            </ul>
+            <div class="plan-action">
+                {% if not user %}
+                <a href="/auth/register" class="btn btn-secondary btn-block">Sign Up</a>
+                {% elif subscription and subscription.plan.value == 'free' %}
+                <button class="btn btn-secondary btn-block" disabled>Current Plan</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Pro Tier -->
+        <div class="pricing-card featured">
+            <div class="featured-badge">Highly Recommended</div>
+            <div class="plan-header">
+                <h2 class="plan-name" style="color: var(--accent-blue);">Pro Access</h2>
+                <div class="plan-price">
+                    <span class="price-amount">$50</span>
+                    <span style="color: var(--text-muted);">/mo</span>
+                </div>
+            </div>
+            <ul class="plan-features">
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    <strong>Complete deal archive</strong>
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Unlimited saved deals
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Advanced search & filters
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Export to Excel
+                </li>
+            </ul>
+            <div class="plan-action">
+                {% if not user %}
+                <a href="/auth/register" class="btn btn-primary btn-block">Get Pro</a>
+                {% elif subscription and subscription.plan.value == 'pro' %}
+                <button class="btn btn-primary btn-block" disabled>Current Plan</button>
+                {% else %}
+                <form method="post" action="/auth/checkout">
+                    <input type="hidden" name="plan" value="pro">
+                    <button type="submit" class="btn btn-primary btn-block">Upgrade Now</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Alerts Add-on -->
+        <div class="pricing-card">
+            <div class="plan-header">
+                <h2 class="plan-name">Deal Alerts</h2>
+                <div class="plan-price">
+                    <span class="price-amount">$10</span>
+                    <span style="color: var(--text-muted);">/each</span>
+                </div>
+            </div>
+            <ul class="plan-features">
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Instant email notifications
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Category or Keyword alerts
+                </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Filter by State/Discount
+                </li>
+            </ul>
+            <div class="plan-action">
+                <a href="/notifications" class="btn btn-secondary btn-block">Manage Alerts</a>
+            </div>
+        </div>
+    </div>
+
+    <div
+        style="max-width: 800px; margin: 0 auto; padding: 3rem; background: #ffffff; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); text-align: center;">
+        <h2 style="font-family: var(--font-display); font-size: 2rem; margin-bottom: 2rem;">Why go Pro?</h2>
+        <div
+            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; text-align: left;">
+            <div>
+                <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">Historical Power</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">See trends and older deals that are still in
+                    stock. Free users only see the last 24 hours.</p>
+            </div>
+            <div>
+                <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">Unlimited Lists</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">Planning a store run? Save as many deals as
+                    you need. Build the ultimate shopping list.</p>
+            </div>
+            <div>
+                <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">Spreadsheet Ready</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">Export your filtered data to Excel for easy
+                    analysis or offline store runs.</p>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

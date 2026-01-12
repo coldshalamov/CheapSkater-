@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}My Account - GloorBot{% endblock %}
+{% block content %}
+<section class="account">
+    <div class="dashboard-header" style="margin-bottom: 2rem;">
+        <h1 style="font-family: var(--font-display); font-size: 2.5rem; font-weight: 800;">My Account</h1>
+        {% if request.query_params.get('checkout') == 'success' %}
+        <div class="alert alert-success" style="margin-top: 1rem;">
+            <span>Subscription activated successfully! Welcome to GloorBot Pro. 🎉</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="account-grid">
+        <!-- Profile Card -->
+        <div class="account-card">
+            <div class="card-header">
+                <h2 style="font-size: 1.1rem; font-weight: 700;">Profile Details</h2>
+            </div>
+            <div class="card-body">
+                <div style="display: flex; gap: 1.5rem; align-items: center;">
+                    <div
+                        style="width: 64px; height: 64px; border-radius: 50%; background: var(--bg-secondary); border: 2px solid var(--accent-blue); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; color: var(--accent-blue);">
+                        {{ (user.display_name or user.email)[0]|upper }}
+                    </div>
+                    <div>
+                        <p style="font-weight: 700; font-size: 1.125rem;">{{ user.display_name or 'GloorBot Member' }}
+                        </p>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">{{ user.email }}</p>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 4px;">Member since {{
+                            user.created_at.strftime('%B %Y') }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Subscription Card -->
+        <div class="account-card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="font-size: 1.1rem; font-weight: 700;">Subscription</h2>
+                <span
+                    style="font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 100px; background: {% if subscription and subscription.plan.value == 'pro' %}var(--accent-blue-soft); color: var(--accent-blue);{% else %}var(--bg-secondary); color: var(--text-muted);{% endif %}">
+                    {{ (subscription.plan.value if subscription else 'free')|upper }}
+                </span>
+            </div>
+            <div class="card-body">
+                {% if subscription and subscription.plan.value == 'pro' %}
+                <div style="margin-bottom: 1.5rem;">
+                    <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Access: <strong
+                            style="color: var(--text-primary);">Full Database</strong></p>
+                    <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Status: <strong
+                            style="color: var(--success);">{{ subscription.status.value|title }}</strong></p>
+                    {% if subscription.current_period_end %}
+                    <p style="font-size: 0.9rem; color: var(--text-secondary);">Next billing: <strong
+                            style="color: var(--text-primary);">{{ subscription.current_period_end.strftime('%B %d, %Y')
+                            }}</strong></p>
+                    {% endif %}
+                </div>
+                <div style="display: flex; gap: 0.75rem;">
+                    <a href="/auth/portal" class="btn btn-secondary">Manage Billing</a>
+                    <a href="/auth/pricing" class="btn btn-ghost">View Plans</a>
+                </div>
+                {% else %}
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">You are currently
+                    using the <strong>Free</strong> plan.</p>
+                <a href="/auth/pricing" class="btn btn-primary btn-block">Upgrade to Pro ($50/mo)</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Deal Alerts Card -->
+        <div class="account-card">
+            <div class="card-header">
+                <h2 style="font-size: 1.1rem; font-weight: 700;">Active Alerts</h2>
+            </div>
+            <div class="card-body">
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                    Monitoring <strong>{{ alert_count or 0 }}</strong> custom criteria. Stay notified on the go!
+                </p>
+                <a href="/notifications" class="btn btn-secondary btn-block">Manage Deal Alerts</a>
+            </div>
+        </div>
+
+        <!-- Logout Card -->
+        <div class="account-card" style="border-color: #fee2e2;">
+            <div class="card-header" style="background: #fff5f5; border-bottom-color: #fee2e2;">
+                <h2 style="font-size: 1.1rem; font-weight: 700; color: #b91c1c;">Account Actions</h2>
+            </div>
+            <div class="card-body">
+                <a href="/auth/logout" class="btn btn-danger btn-block">Sign Out</a>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

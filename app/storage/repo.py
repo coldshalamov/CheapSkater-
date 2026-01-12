@@ -517,7 +517,14 @@ def list_distinct_categories(session: Session) -> list[str]:
         .distinct()
         .order_by(Observation.category.asc())
     )
-    return [row[0] for row in session.execute(stmt)]
+    resolved: dict[str, str] = {}
+    for row in session.execute(stmt):
+        raw = (row[0] or "").strip()
+        if not raw:
+            continue
+        key = raw.casefold()
+        resolved.setdefault(key, raw)
+    return sorted(resolved.values(), key=lambda value: value.casefold())
 
 
 def insert_quarantine(

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Create Alert - GloorBot{% endblock %}
+{% block content %}
+<section class="auth-page" style="max-width: 600px;">
+    <div class="auth-card">
+        <div class="auth-header" style="text-align: left;">
+            <a href="/notifications"
+                style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: flex; align-items: center; gap: 4px; margin-bottom: 1rem;">
+                ← Back to Alerts
+            </a>
+            <h1 class="auth-title">Create Deal Alert</h1>
+            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Get notified instantly when matches appear —
+                ${{ alert_price|int }}/mo</p>
+        </div>
+
+        <form method="post" action="/notifications/create" class="auth-form" style="margin-top: 2rem;">
+            <div class="form-group">
+                <label for="name" class="form-label">Alert Name</label>
+                <input type="text" id="name" name="name" required placeholder="e.g., Flooring Deals 70%+"
+                    class="form-input">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Alert Type</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <label
+                        style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem; border: 1px solid var(--border-subtle); border-radius: 12px; cursor: pointer; transition: all 0.2s;"
+                        class="type-option">
+                        <input type="radio" name="alert_type" value="category" checked style="margin-bottom: 12px;">
+                        <span style="font-weight: 700;">Category</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Watch a department</span>
+                    </label>
+                    <label
+                        style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem; border: 1px solid var(--border-subtle); border-radius: 12px; cursor: pointer; transition: all 0.2s;"
+                        class="type-option">
+                        <input type="radio" name="alert_type" value="keyword" style="margin-bottom: 12px;">
+                        <span style="font-weight: 700;">Keyword</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Search for specific terms</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group" id="category-field">
+                <label for="category" class="form-label">Select Category</label>
+                <select id="category" name="category" class="form-input">
+                    <option value="">Any Category</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat }}">{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group" id="keywords-field" style="display: none;">
+                <label for="keywords" class="form-label">Keywords</label>
+                <input type="text" id="keywords" name="keywords" placeholder="e.g., DeWalt, Makita, Drill"
+                    class="form-input">
+            </div>
+
+            <div style="padding: 1.5rem; background: var(--bg-secondary); border-radius: 12px; margin: 2rem 0;">
+                <h3 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-secondary);">
+                    Filters</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label for="min_discount" class="form-label">Min Discount</label>
+                        <select id="min_discount" name="min_discount" class="form-input">
+                            <option value="">Any</option>
+                            <option value="50">50%+</option>
+                            <option value="70">70%+</option>
+                            <option value="90">90%+</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="states" class="form-label">State</label>
+                        <select id="states" name="states" class="form-input">
+                            <option value="">WA & OR</option>
+                            <option value="WA">Washington</option>
+                            <option value="OR">Oregon</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top: 1rem;">Create My Alert —
+                ${{ alert_price|int }}/mo</button>
+        </form>
+    </div>
+</section>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const radios = document.querySelectorAll('input[name="alert_type"]');
+        const catField = document.getElementById('category-field');
+        const keyField = document.getElementById('keywords-field');
+
+        radios.forEach(r => {
+            r.addEventListener('change', () => {
+                if (r.value === 'category') {
+                    catField.style.display = 'block';
+                    keyField.style.display = 'none';
+                } else {
+                    catField.style.display = 'none';
+                    keyField.style.display = 'block';
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

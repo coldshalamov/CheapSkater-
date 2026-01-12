@@ -53,6 +53,15 @@ app = FastAPI(title="CheapSkater Clearance Dashboard")
 from app.ingest import router as ingest_router
 app.include_router(ingest_router)
 
+# Register auth router for login, registration, and subscriptions
+from app.auth.routes import router as auth_router
+app.include_router(auth_router)
+
+# Register notification routes for deal alerts
+from app.notifications.routes import router as notifications_router
+app.include_router(notifications_router)
+
+
 class IngestDeal(BaseModel):
     store_id: str
     store_name: str
@@ -82,6 +91,22 @@ def _extract_sku(url: str) -> str | None:
 
 def _extract_category_name(url: str | None) -> str:
     return extract_category_name(url)
+
+
+def _sanitize_image_url(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered.startswith("data:"):
+        return None
+    if lowered.endswith(".svg"):
+        return None
+    if any(token in lowered for token in ("badge", "sprite", "icon")):
+        return None
+    return cleaned
 
 SESSION_SECRET = os.getenv("CHEAPSKATER_SESSION_SECRET", "cheapskater-session-secret")
 SESSION_MAX_AGE = int(os.getenv("CHEAPSKATER_SESSION_MAX_AGE", str(60 * 60 * 24 * 30)))
@@ -121,18 +146,7 @@ SORT_OPTIONS = [
     ("price_low", "Price: Low → High"),
     ("price_high", "Price: High → Low"),
 ]
-DEFAULT_CATEGORY_OPTIONS = [
-    "Roofing",
-    "Drywall",
-    "Insulation",
-    "Lumber",
-    "Flooring",
-    "Plumbing",
-    "Electrical",
-    "Tools",
-    "Paint",
-    "Hardware",
-]
+DEFAULT_CATEGORY_OPTIONS: list[str] = []
 INITIAL_GROUP_BATCH = 30
 _STORE_HOURS_SUFFIX = re.compile(r"\s+\d{1,2}\s*(?:AM|PM)$", re.I)
 _STOCK_COUNT_PATTERN = re.compile(r"(?:only|about)?\s*(\d+)\s*(?:left|available|in\s*stock|qty|quantity)", re.I)
@@ -448,6 +462,7 @@ TIME_FILTER_OPTIONS = [
 ]
 DISCOUNT_FILTER_OPTIONS = [
     ("all", "All Discounts", None, None),
+    ("50", "50%+", 50.0, None),
     ("60", "60%+", 60.0, None),
     ("75", "75%+", 75.0, None),
     ("90", "90%+", 90.0, None),
@@ -1063,9 +1078,14 @@ def _select_items(
     return repo.get_clearance_items(session, state=state, category=category)
 
 
-def _collect_categories(session: Session) -> list[str]:
+def _collect_categories(session: Session, *, selected: str | None = None) -> list[str]:
     discovered = repo.list_distinct_categories(session)
-    merged = sorted({*DEFAULT_CATEGORY_OPTIONS, *discovered})
+    merged = list(discovered)
+    if selected:
+        cleaned = selected.strip()
+        if cleaned and cleaned not in merged:
+            merged.append(cleaned)
+    merged = sorted({*DEFAULT_CATEGORY_OPTIONS, *merged}, key=lambda value: value.casefold())
     return merged
 
 
@@ -1086,10 +1106,24 @@ def cheapskater_view(request: Request):
         }
         for store_number, entries in grouped.items()
     ]
+    # Get user from session for nav
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
+    
     return templates.TemplateResponse(
         "cheapskater.html",
         {
             "request": request,
+            "user": user,
             "cart_items": cart_items,
             "cart_groups": cart_groups,
             "cart_total_items": cart_total_items,
@@ -1232,13 +1266,27 @@ def _render_dashboard(
         len(serialized_groups),
         len(initial_groups),
     )
-    categories = _collect_categories(session)
+    categories = _collect_categories(session, selected=category)
     last_updated = repo.get_latest_timestamp(session)
+
+    # Get user from session for nav
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
 
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
+            "user": user,
             "items": items,
             "groups": serialized_groups,
             "initial_groups": initial_groups,
@@ -1303,7 +1351,7 @@ def list_clearance(
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
-        None, description="Discount preset (percentage or custom)."
+        "50", description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(
         None, description="Custom minimum discount percentage."
@@ -1351,7 +1399,7 @@ def list_new_clearance_today(
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
-        None, description="Discount preset (percentage or custom)."
+        "50", description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(
         None, description="Custom minimum discount percentage."
@@ -1399,7 +1447,7 @@ def export_excel(
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
-        None, description="Discount preset (percentage or custom)."
+        "50", description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
     discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
@@ -1534,7 +1582,7 @@ def api_clearance(
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
-        None, description="Discount preset (percentage or custom)."
+        "50", description="Discount preset (percentage or custom)."
     ),
     discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
     discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
@@ -1680,8 +1728,7 @@ def ingest_data(
         category_name = preferred_category or _extract_category_name(deal.category_url)
 
         image_url = deal.image_url
-        if isinstance(image_url, str):
-            image_url = image_url.strip() or None
+        image_url = _sanitize_image_url(image_url)
 
         # Ensure Item exists
         repo.upsert_item(

@@ -1,36 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}GloorBot Dashboard{% endblock %}</title>
+    <meta name="description"
+        content="GloorBot - Find 50-90% off clearance deals at Lowe's stores. Real-time deal alerts and notifications.">
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='img/gloorbot.png') }}">
+    <title>{% block title %}GloorBot - Lowe's Clearance Tracker{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     {% block extra_head %}{% endblock %}
 </head>
+
 <body>
     <header class="site-header">
-        <div class="brand">
+        <div class="container">
             <a href="/" class="brand-link">
-                <img src="{{ url_for('static', path='img/gloorbot.png') }}" alt="GloorBot logo" class="brand-logo" loading="lazy">
-                <div class="brand-text">
-                    <span class="brand-name">GloorBot</span>
-                    <span class="brand-tagline">WA &amp; OR Lowe's Clearance</span>
-                </div>
+                <img src="{{ url_for('static', path='img/gloorbot.png') }}" alt="GloorBot logo" class="brand-logo">
+                <span class="brand-name">GloorBot</span>
             </a>
+            <nav class="nav-links">
+                <a href="/" class="nav-link{% if active_scope == 'all' %} active{% endif %}">All Deals</a>
+                <a href="/new-today?state=WA" class="nav-link{% if state == 'WA' %} active{% endif %}">WA Deals</a>
+                <a href="/new-today?state=OR" class="nav-link{% if state == 'OR' %} active{% endif %}">OR Deals</a>
+                <a href="/cheapskater"
+                    class="nav-link{% if active_scope == 'cheapskater' %} active{% endif %}">Saved</a>
+                {% if user %}
+                <a href="/notifications"
+                    class="nav-link{% if active_scope == 'notifications' %} active{% endif %}">Alerts</a>
+                <a href="/auth/account" class="nav-link{% if active_scope == 'account' %} active{% endif %}">Account</a>
+                {% else %}
+                <a href="/auth/pricing" class="nav-link">Pricing</a>
+                <a href="/auth/login" class="btn btn-primary">Sign In</a>
+                {% endif %}
+            </nav>
         </div>
-        <nav class="nav-links" aria-label="Primary navigation">
-            <a href="/" class="nav-link{% if active_scope == 'all' %} active{% endif %}">All Clearance</a>
-            <a href="/new-today?state=WA" class="nav-link{% if active_scope == 'new' and state == 'WA' %} active{% endif %}">New Today WA</a>
-            <a href="/new-today?state=OR" class="nav-link{% if active_scope == 'new' and state == 'OR' %} active{% endif %}">New Today OR</a>
-            <a href="/cheapskater" class="nav-link{% if active_scope == 'cheapskater' %} active{% endif %}">Saved Deals</a>
-        </nav>
     </header>
+
     <main class="site-main">
-        {% block content %}{% endblock %}
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
     </main>
+
     <footer class="site-footer">
-        <p>Tracking Lowe's building-material clearance for Washington &amp; Oregon.</p>
+        <div class="container">
+            <p>&copy; {{ now.year if now else '2026' }} GloorBot. Tracking Lowe's Clearance across WA & OR.</p>
+        </div>
     </footer>
     {% block extra_scripts %}{% endblock %}
 </body>
+
 </html>

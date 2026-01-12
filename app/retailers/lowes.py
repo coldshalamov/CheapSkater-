@@ -1207,17 +1207,99 @@ async def _extract_card_href(card: Any) -> str | None:
 
 
 async def _extract_card_image(card: Any) -> str | None:
-    locator = await _locator_or_none(card, selectors.IMG)
-    if locator is None:
+    def _best_from_srcset(srcset: str) -> str | None:
+        if not srcset:
+            return None
+        best_url: str | None = None
+        best_weight: float = -1
+        for part in srcset.split(","):
+            candidate = part.strip()
+            if not candidate:
+                continue
+            tokens = candidate.split()
+            url = tokens[0].strip()
+            descriptor = tokens[1].strip() if len(tokens) > 1 else ""
+            weight: float = 0
+            if descriptor.endswith("w"):
+                try:
+                    weight = float(int(descriptor[:-1]))
+                except Exception:
+                    weight = 0
+            elif descriptor.endswith("x"):
+                try:
+                    weight = float(descriptor[:-1]) * 1000
+                except Exception:
+                    weight = 0
+            if weight >= best_weight:
+                best_weight = weight
+                best_url = url
+        return best_url
+
+    def _score_candidate(url: str | None, alt_text: str | None) -> int:
+        if not url:
+            return -10_000
+        lowered = url.lower()
+        if lowered.startswith("data:"):
+            return -10_000
+        if lowered.endswith(".svg") or "svg" in lowered:
+            return -5_000
+
+        alt_lower = (alt_text or "").strip().lower()
+        score = 0
+
+        if "mobileimages.lowes.com" in lowered or "images.lowes.com" in lowered:
+            score += 120
+        if "productimages" in lowered:
+            score += 80
+        if lowered.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            score += 10
+
+        if any(token in alt_lower for token in ("clearance", "badge", "icon")):
+            score -= 200
+        if any(token in lowered for token in ("badge", "icon", "sprite")):
+            score -= 150
+        if "clearance" in lowered and any(token in lowered for token in ("badge", "icon", "label")):
+            score -= 200
+
+        return score
+
+    try:
+        candidates_locator = card.locator(":scope img, :scope picture source")
+    except Exception:
         return None
-    for attr in ("src", "data-src", "data-original", "data-srcset"):
-        value = await _safe_get_attribute(locator, attr)
-        if value:
-            candidate = value.split(",")[0].strip()
+
+    try:
+        count = await candidates_locator.count()
+    except Exception:
+        return None
+
+    best_url: str | None = None
+    best_score = -10_000
+
+    for idx in range(min(int(count or 0), 12)):
+        locator = candidates_locator.nth(idx)
+        alt = await _safe_get_attribute(locator, "alt")
+        for attr in (
+            "data-srcset",
+            "srcset",
+            "data-src",
+            "data-original",
+            "data-lazy",
+            "src",
+        ):
+            value = await _safe_get_attribute(locator, attr)
+            if not value:
+                continue
+            candidate = _best_from_srcset(value) if "srcset" in attr else value
             normalized = _normalize_image_url(candidate)
-            if normalized:
-                return normalized
-    return None
+            if not normalized:
+                continue
+            score = _score_candidate(normalized, alt)
+            if score > best_score:
+                best_score = score
+                best_url = normalized
+
+    return best_url
 
 
 async def _extract_card_sku(card: Any, product_url: str | None) -> str | None:

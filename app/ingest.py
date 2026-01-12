@@ -226,6 +226,42 @@ def ingest_deals(
 
     session.commit()
 
+    # Trigger notification processing for instant alerts
+    if accepted > 0:
+        try:
+            from app.notifications.processor import process_new_deals
+            # Build deal dictionaries for notification matching
+            notifiable_deals = []
+            for deal in request.deals:
+                sku = extract_sku_from_url(deal.product_url)
+                if sku:
+                    store_info = parse_store_info(deal.store_id, deal.store_name)
+                    notifiable_deals.append({
+                        "sku": sku,
+                        "store_id": deal.store_id,
+                        "store_name": deal.store_name,
+                        "store_state": store_info.get("state", ""),
+                        "store_city": store_info.get("city", ""),
+                        "store_label": deal.store_name,
+                        "title": deal.title,
+                        "category": _resolve_category(deal),
+                        "price": deal.price,
+                        "price_was": deal.was_price,
+                        "pct_off": deal.pct_off,
+                        "product_url": deal.product_url,
+                        "image_url": deal.image_url,
+                    })
+            
+            if notifiable_deals:
+                result = process_new_deals(session, notifiable_deals)
+                LOGGER.info(
+                    "[INGEST] batch_id=%s notifications alerts_matched=%s emails_sent=%s",
+                    batch_id, result.get("alerts_matched", 0), result.get("emails_sent", 0)
+                )
+        except Exception as e:
+            # Don't fail ingestion if notifications fail
+            LOGGER.warning("[INGEST] batch_id=%s notification processing error: %s", batch_id, e)
+
     LOGGER.info(
         "[INGEST] batch_id=%s client_id=%s done accepted=%s errors=%s",
         batch_id,

@@ -311,17 +311,21 @@ def test_api_sort_orders(tmp_path) -> None:
         session.commit()
 
     client = TestClient(app)
-    newest = client.get("/api/clearance")
+    newest = client.get("/api/clearance", params={"discount_filter": "all"})
     assert newest.status_code == 200
     newest_titles = [group["title"] for group in newest.json()["groups"]]
     assert newest_titles[0] == "Beta Ladder"
 
-    alpha_desc = client.get("/api/clearance", params={"sort_order": "alpha_desc"})
+    alpha_desc = client.get(
+        "/api/clearance", params={"sort_order": "alpha_desc", "discount_filter": "all"}
+    )
     assert alpha_desc.status_code == 200
     alpha_titles = [group["title"] for group in alpha_desc.json()["groups"]]
     assert alpha_titles == sorted(alpha_titles, reverse=True)
 
-    price_low = client.get("/api/clearance", params={"sort_order": "price_low"})
+    price_low = client.get(
+        "/api/clearance", params={"sort_order": "price_low", "discount_filter": "all"}
+    )
     assert price_low.status_code == 200
     low_prices = [group["min_price"] for group in price_low.json()["groups"]]
     assert low_prices == sorted(low_prices)

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}My Alerts - GloorBot{% endblock %}
+{% block content %}
+<section class="notifications">
+    <div class="dashboard-header"
+        style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+            <h1 style="font-family: var(--font-display); font-size: 2.5rem; font-weight: 800;">Deal Alerts</h1>
+            <p style="color: var(--text-secondary);">Manage your real-time notification criteria</p>
+        </div>
+        <a href="/notifications/create" class="btn btn-primary">Create New Alert</a>
+    </div>
+
+    {% if not has_subscription %}
+    <div class="alert" style="background: #fffbeb; border: 1px solid #fde68a; color: #92400e;">
+        <div>
+            <strong>Access Limited</strong> — Subscription required to enable real-time deal alerts.
+            <a href="/auth/pricing" style="font-weight: 700; text-decoration: underline; margin-left: 8px;">View Pricing
+                →</a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if alerts %}
+    <div class="alerts-list" style="display: grid; gap: 1rem;">
+        {% for alert in alerts %}
+        <div class="alert-card {% if not alert.is_active %}inactive{% endif %}" data-alert-id="{{ alert.id }}">
+            <div style="display: flex; gap: 1.5rem; align-items: center;">
+                <div
+                    style="width: 48px; height: 48px; background: var(--bg-secondary); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+                    {% if alert.alert_type.value == 'category' %}📁{% else %}🔍{% endif %}
+                </div>
+                <div class="alert-info">
+                    <h3 style="font-size: 1.1rem; font-weight: 700;">{{ alert.name }}</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 4px;">
+                        <span class="alert-tag">{{ alert.alert_type.value|title }}</span>
+                        {% if alert.category %}<span class="alert-tag">{{ alert.category }}</span>{% endif %}
+                        {% if alert.keywords %}<span class="alert-tag">{{ alert.keywords }}</span>{% endif %}
+                        <span class="alert-tag">{{ alert.frequency.value|title }}</span>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <div style="text-align: right; margin-right: 1rem;">
+                    <span style="font-weight: 700; font-size: 1.1rem;">${{ alert.monthly_price|int }}</span>
+                    <span style="color: var(--text-muted); font-size: 0.8rem;">/mo</span>
+                </div>
+                <button class="btn btn-secondary btn-sm toggle-alert" data-alert-id="{{ alert.id }}">
+                    {{ 'Pause' if alert.is_active else 'Resume' }}
+                </button>
+                <button class="btn btn-ghost btn-sm delete-alert" data-alert-id="{{ alert.id }}"
+                    style="color: var(--danger);">Delete</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div
+        style="text-align: center; padding: 4rem; background: #ffffff; border: 2px dashed var(--border-subtle); border-radius: var(--radius-lg);">
+        <h2 style="font-family: var(--font-display); font-size: 1.5rem; margin-bottom: 1rem;">No alerts active</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 2rem;">Wanna know exactly when that lumber or flooring
+            hits 70% off? Create your first alert!</p>
+        <a href="/notifications/create" class="btn btn-primary btn-lg">Set Up My First Alert</a>
+    </div>
+    {% endif %}
+</section>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.toggle-alert').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.dataset.alertId;
+                const res = await fetch(`/notifications/${id}/toggle`, { method: 'POST' });
+                if (res.ok) window.location.reload();
+            });
+        });
+        document.querySelectorAll('.delete-alert').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                if (!confirm('Permanently delete this alert?')) return;
+                const id = this.dataset.alertId;
+                const res = await fetch(`/notifications/${id}`, { method: 'DELETE' });
+                if (res.ok) window.location.reload();
+            });
+        });
+    });
+</script>
+{% endblock %}
