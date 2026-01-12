@@ -108,26 +108,57 @@
           <span class="deal-card__price">${{ group.min_price }}</span>
           <span class="deal-card__was-price">${{ group.min_price_was }}</span>
         </div>
-        <div style="margin-top: 1rem; font-size: 0.875rem; color: var(--text-secondary);">
+        <div class="store-module">
+          {% if group.stores %}
+          {% set primary_store = group.stores[0] %}
+          <!-- Primary Store -->
+          <div class="store-card primary" data-store-name="{{ primary_store.store_label }}"
+            onclick="copyStoreFromElement(this)">
+            <div class="store-card-content">
+              <div class="store-name-row">
+                <span class="store-icon">📍</span>
+                <span class="store-name">{{ primary_store.store_label }}</span>
+              </div>
+              <div class="store-meta">
+                <span
+                  class="stock-badge {% if primary_store.stock_label and ('High' in primary_store.stock_label or 'Low' in primary_store.stock_label) %}in-stock{% endif %}">
+                  {{ primary_store.stock_label or 'Stock unknown' }}
+                </span>
+                {% if group.stores|length > 1 %}
+                <span class="more-badge">+{{ group.stores|length - 1 }} more</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="copy-hint">Click to copy</div>
+          </div>
+
+          <!-- Hidden Stores -->
           {% if group.stores|length > 1 %}
-          <select class="form-select" style="width: 100%; font-size: 0.85rem; padding: 0.25rem;">
-            {% for store in group.stores %}
-            <option>
-              {{ store.store_label }} - {{ store.stock_label or 'Unknown stock' }}
-            </option>
-            {% endfor %}
-          </select>
-          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-            {{ group.stores|length }} stores available
+          <div class="more-stores-container">
+            <button class="btn-toggle-stores" type="button" onclick="toggleStores(this)">
+              See {{ group.stores|length - 1 }} other locations
+            </button>
+            <div class="stores-list-scroll">
+              {% for store in group.stores[1:] %}
+              <div class="store-card secondary" data-store-name="{{ store.store_label }}"
+                onclick="copyStoreFromElement(this)">
+                <div class="store-card-content">
+                  <div class="store-name-row">
+                    <span class="store-name">{{ store.store_label }}</span>
+                  </div>
+                  <div class="store-meta">
+                    <span class="stock-badge small">
+                      {{ store.stock_label or 'Stock unknown' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
           </div>
+          {% endif %}
           {% else %}
-          {% set store = group.stores[0] %}
-          <div style="font-weight: 500;">
-            {{ store.store_label }}
-          </div>
-          <div style="font-size: 0.75rem; color: var(--text-muted);">
-            {{ store.stock_label or 'Stock unknown' }}
-          </div>
+          <div style="font-size: 0.875rem; color: var(--text-muted);">No specific store info</div>
           {% endif %}
         </div>
       </div>
@@ -138,6 +169,7 @@
     {% endfor %}
   </div>
 </section>
+<div class="toast-container" id="toast-container"></div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -180,5 +212,69 @@
       setCategoryAndSubmit(category);
     });
   })();
+
+  // Store expander logic
+  function toggleStores(btn) {
+    const container = btn.nextElementSibling;
+    if (container) {
+      if (container.style.maxHeight && container.style.maxHeight !== '0px') {
+        // Collapse
+        container.style.maxHeight = '0px';
+        container.classList.remove('expanded');
+        btn.classList.remove('expanded');
+      } else {
+        // Expand
+        container.classList.add('expanded');
+        // re-force calc if needed, usually css class is enough if max-height is set there
+        container.style.maxHeight = '200px';
+        btn.classList.add('expanded');
+      }
+    }
+  }
+
+  // Copy to clipboard with toast
+  function copyStoreFromElement(element) {
+    const storeName = element.getAttribute('data-store-name');
+    copyStoreToClipboard(storeName);
+  }
+
+  function copyStoreToClipboard(storeName) {
+    if (!storeName) return;
+    navigator.clipboard.writeText(storeName).then(() => {
+      showToast('Store Copied!', `Select <strong>${storeName}</strong> to see this price.`);
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+      // Fallback
+      showToast('Error', 'Could not copy store name.');
+    });
+  }
+
+  function showToast(title, message) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `
+      <div class="toast-icon">📋</div>
+      <div class="toast-content">
+        <div class="toast-title">${title}</div>
+        <div class="toast-message">${message}</div>
+      </div>
+    `;
+
+    container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+
+    // Remove after 3s
+    setTimeout(() => {
+      toast.classList.remove('show');
+      toast.addEventListener('transitionend', () => {
+        toast.remove();
+      });
+    }, 4000);
+  }
 </script>
 {% endblock %}

@@ -512,10 +512,10 @@ def list_distinct_categories(session: Session) -> list[str]:
     """Return sorted list of categories with active clearance inventory."""
 
     stmt = (
-        select(Observation.category)
-        .where(Observation.clearance.is_(True))
+        select(StorePriceHistory.category)
+        .where(StorePriceHistory.clearance.is_(True))
         .distinct()
-        .order_by(Observation.category.asc())
+        .order_by(StorePriceHistory.category.asc())
     )
     resolved: dict[str, str] = {}
     for row in session.execute(stmt):
