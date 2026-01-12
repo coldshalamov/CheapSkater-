@@ -508,15 +508,22 @@ def get_latest_timestamp(session: Session) -> datetime | None:
     return session.scalar(stmt)
 
 
-def list_distinct_categories(session: Session) -> list[str]:
+def list_distinct_categories(
+    session: Session, *, state: str | None = None, min_pct_off: float | None = None
+) -> list[str]:
     """Return sorted list of categories with active clearance inventory."""
 
+    _, subquery = _latest_history_statement(state=state)
     stmt = (
-        select(StorePriceHistory.category)
-        .where(StorePriceHistory.clearance.is_(True))
-        .distinct()
-        .order_by(StorePriceHistory.category.asc())
+        select(subquery.c.category)
+        .where(subquery.c.rn == 1)
+        .where(subquery.c.clearance.is_(True))
     )
+    if min_pct_off is not None:
+        stmt = stmt.where(subquery.c.pct_off >= min_pct_off)
+
+    stmt = stmt.distinct().order_by(subquery.c.category.asc())
+
     resolved: dict[str, str] = {}
     for row in session.execute(stmt):
         raw = (row[0] or "").strip()

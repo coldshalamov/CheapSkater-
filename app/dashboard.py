@@ -1078,8 +1078,14 @@ def _select_items(
     return repo.get_clearance_items(session, state=state, category=category)
 
 
-def _collect_categories(session: Session, *, selected: str | None = None) -> list[str]:
-    discovered = repo.list_distinct_categories(session)
+def _collect_categories(
+    session: Session,
+    *,
+    state: str | None = None,
+    min_pct_off: float | None = None,
+    selected: str | None = None,
+) -> list[str]:
+    discovered = repo.list_distinct_categories(session, state=state, min_pct_off=min_pct_off)
     merged = list(discovered)
     if selected:
         cleaned = selected.strip()
@@ -1266,7 +1272,12 @@ def _render_dashboard(
         len(serialized_groups),
         len(initial_groups),
     )
-    categories = _collect_categories(session, selected=category)
+    categories = _collect_categories(
+        session,
+        state=state,
+        min_pct_off=filters.get("discount_min"),
+        selected=category,
+    )
     last_updated = repo.get_latest_timestamp(session)
 
     # Get user from session for nav

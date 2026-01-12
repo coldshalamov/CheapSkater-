@@ -120,10 +120,6 @@
                 <span class="store-name">{{ primary_store.store_label }}</span>
               </div>
               <div class="store-meta">
-                <span
-                  class="stock-badge {% if primary_store.stock_label and ('High' in primary_store.stock_label or 'Low' in primary_store.stock_label) %}in-stock{% endif %}">
-                  {{ primary_store.stock_label or 'Stock unknown' }}
-                </span>
                 {% if group.stores|length > 1 %}
                 <span class="more-badge">+{{ group.stores|length - 1 }} more</span>
                 {% endif %}
@@ -147,9 +143,6 @@
                     <span class="store-name">{{ store.store_label }}</span>
                   </div>
                   <div class="store-meta">
-                    <span class="stock-badge small">
-                      {{ store.stock_label or 'Stock unknown' }}
-                    </span>
                   </div>
                 </div>
               </div>
