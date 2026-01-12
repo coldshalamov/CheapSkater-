@@ -90,12 +90,11 @@
           style="background: #f1f5f9; color: #94a3b8; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: 600;">
           No Image</div>
         {% endif %}
-        <div class="deal-card__discount">{{ group.max_pct_off|int }}% OFF</div>
+        <div class="deal-card__discount">{{ (group.max_pct_off * 100)|int }}% OFF</div>
       </div>
       <div class="deal-card__body">
         {% if group.category %}
-        <button type="button" class="deal-card__category category-chip"
-          data-category="{{ group.category }}"
+        <button type="button" class="deal-card__category category-chip" data-category="{{ group.category }}"
           aria-label="Filter by category {{ group.category }}">
           {{ group.category }}
         </button>
