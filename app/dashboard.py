@@ -1078,21 +1078,16 @@ def _select_items(
     return repo.get_clearance_items(session, state=state, category=category)
 
 
-def _collect_categories(
-    session: Session,
-    *,
-    state: str | None = None,
-    min_pct_off: float | None = None,
-    selected: str | None = None,
-) -> list[str]:
-    discovered = repo.list_distinct_categories(session, state=state, min_pct_off=min_pct_off)
-    merged = list(discovered)
-    if selected:
-        cleaned = selected.strip()
-        if cleaned and cleaned not in merged:
-            merged.append(cleaned)
-    merged = sorted({*DEFAULT_CATEGORY_OPTIONS, *merged}, key=lambda value: value.casefold())
-    return merged
+def _collect_categories_from_items(items: list[dict[str, Any]]) -> list[str]:
+    """Extract unique categories from the filtered items list."""
+    categories_set = set()
+    for item in items:
+        category = item.get("category")
+        if category:
+            cleaned = str(category).strip()
+            if cleaned:
+                categories_set.add(cleaned)
+    return sorted(categories_set, key=lambda value: value.casefold())
 
 
 @app.get("/cheapskater")
@@ -1272,12 +1267,7 @@ def _render_dashboard(
         len(serialized_groups),
         len(initial_groups),
     )
-    categories = _collect_categories(
-        session,
-        state=state,
-        min_pct_off=filters.get("discount_min"),
-        selected=category,
-    )
+    categories = _collect_categories_from_items(items)
     last_updated = repo.get_latest_timestamp(session)
 
     # Get user from session for nav
