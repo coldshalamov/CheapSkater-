@@ -765,3 +765,122 @@ input[type="search"]:focus {
     font-size: 0.9rem;
     color: var(--text-secondary);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRICING PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pricing {
+    padding: 40px 0;
+}
+
+.pricing-header {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto 48px;
+}
+
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 32px;
+    max-width: 1000px;
+    margin: 0 auto 64px;
+}
+
+.pricing-card {
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(10px);
+    border: 1px solid white;
+    border-radius: var(--radius-xl);
+    padding: 32px;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    transition: transform 0.3s ease;
+}
+
+.pricing-card.featured {
+    transform: scale(1.05);
+    border: 2px solid var(--accent-blue);
+    z-index: 10;
+    box-shadow: var(--shadow-xl);
+}
+
+.pricing-card:hover {
+    transform: translateY(-5px);
+}
+
+.pricing-card.featured:hover {
+    transform: scale(1.05) translateY(-5px);
+}
+
+.featured-badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent-blue);
+    color: white;
+    padding: 4px 16px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.plan-header {
+    text-align: center;
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--bg-secondary);
+}
+
+.plan-name {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.plan-price {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.price-amount {
+    font-size: 3rem;
+    font-weight: 800;
+    font-family: var(--font-heading);
+    color: var(--text-primary);
+}
+
+.plan-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 32px 0;
+    flex-grow: 1;
+}
+
+.plan-features li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 16px;
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+.feature-check {
+    width: 24px;
+    height: 24px;
+    color: var(--success);
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.plan-action {
+    margin-top: auto;
+}
