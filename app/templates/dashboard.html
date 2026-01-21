@@ -7,7 +7,7 @@
     <div class="subtitle">
       Tracking clearance items at <strong>{{ items|length }}</strong> unique listings across
       {% if region == 'WA_OR' %}Washington & Oregon{% elif region == 'FL' %}Florida{% else %}all regions{% endif %}.
-      Last updated {{ last_updated.strftime('%I:%M %p') }} UTC.
+      {% if last_updated %}Last updated {{ last_updated.strftime('%I:%M %p') }} UTC.{% else %}No data yet.{% endif %}
     </div>
     <div class="nav-links">
       <a class="nav-link{% if active_scope == 'all' %} active{% endif %}" href="{{ base_url or '/' }}">All Clearance</a>
