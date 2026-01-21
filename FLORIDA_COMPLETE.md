@@ -20,13 +20,16 @@
 **Total Coverage**: Stuart to Miami (18 stores)
 
 ### 3. UI Updates ✅
-- **Region Selector**: Dropdown to switch between "All Regions", "Washington & Oregon", or "Florida"
-- **State Filter**: Now includes "FL" option
-- **Smart Filtering**: All queries respect region selection
+- **Separate Pages**: Distinct URLs for each region
+  - **Pacific NW**: `/` (Default)
+  - **Florida**: `/florida`
+- **Global Navigation**: Switch between "Pacific NW" and "Florida" in the top navigation bar
+- **State Filter**: WA/OR state filter only appears on Pacific NW page
+- **Smart Filtering**: All queries automatically respect the current page's region
 
 ### 4. Backend Updates ✅
+- Created specific routes: `/florida` and `/florida/new-today`
 - All repository functions support `region` parameter
-- Dashboard routes accept and filter by region
 - Automatic region detection helpers
 
 ### 5. Configuration ✅
@@ -65,8 +68,8 @@ python -m app.main --config config_florida.yml
 # Start the dashboard
 python -m app.main --dashboard
 
-# Open browser to http://localhost:8000
-# Select "Florida" from the Region dropdown
+# Open browser to http://localhost:8000/florida
+# Or use the "Florida" link in the top navigation
 ```
 
 ### Test Single Store

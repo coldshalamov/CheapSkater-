@@ -97,20 +97,19 @@ repo.upsert_store(
 
 ## Using the UI
 
-### Region Selector
+### Separate Pages
 
-The dashboard now includes a **Region** dropdown filter:
-- **All Regions**: Shows deals from all regions
-- **Washington & Oregon**: Shows only WA/OR deals
-- **Florida**: Shows only FL deals
+The application is now divided into two main sections:
+
+1.  **Pacific Northwest (WA & OR)**: Accessible at the root URL (`/`)
+2.  **Florida**: Accessible at `/florida`
+
+Use the top navigation bar to switch between regions.
 
 ### State Filter
 
-The **State** dropdown now includes:
-- **ALL**: All states in the selected region
-- **WA**: Washington only
-- **OR**: Oregon only
-- **FL**: Florida only
+- **Pacific NW Page**: Includes a State dropdown to filter between WA and OR.
+- **Florida Page**: Shows all Florida stores (state filter is hidden).
 
 ### Filtering Behavior
 
@@ -119,16 +118,18 @@ The **State** dropdown now includes:
 - All other filters (category, discount, etc.) work the same way
 
 ## API Changes
+### Routes
+
+- `GET /` - Pacific NW (WA/OR) Dashboard
+- `GET /new-today` - Pacific NW New Items
+- `GET /florida` - Florida Dashboard
+- `GET /florida/new-today` - Florida New Items
 
 ### Query Parameters
 
-All dashboard endpoints now accept an optional `region` parameter:
-
-```
-GET /?region=FL
-GET /?region=WA_OR
-GET /new-today?region=FL&state=FL
-```
+Dashboard endpoints still use `region` internally, but it depends on the route:
+- Root routes default to `region=WA_OR`
+- Florida routes force `region=FL`
 
 ### Repository Functions
 

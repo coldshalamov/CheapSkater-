@@ -10,7 +10,9 @@
     <title>{% block title %}GloorBot - Lowe's Clearance Tracker{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     {% block extra_head %}{% endblock %}
 </head>
@@ -23,9 +25,10 @@
                 <span class="brand-name">GloorBot</span>
             </a>
             <nav class="nav-links">
-                <a href="/" class="nav-link{% if active_scope == 'all' %} active{% endif %}">All Deals</a>
-                <a href="/new-today?state=WA" class="nav-link{% if state == 'WA' %} active{% endif %}">WA Deals</a>
-                <a href="/new-today?state=OR" class="nav-link{% if state == 'OR' %} active{% endif %}">OR Deals</a>
+                <a href="/"
+                    class="nav-link{% if request.url.path == '/' or request.url.path == '/new-today' %} active{% endif %}">Pacific
+                    NW</a>
+                <a href="/florida" class="nav-link{% if '/florida' in request.url.path %} active{% endif %}">Florida</a>
                 <a href="/cheapskater"
                     class="nav-link{% if active_scope == 'cheapskater' %} active{% endif %}">Saved</a>
                 {% if user %}

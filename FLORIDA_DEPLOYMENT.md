@@ -57,9 +57,9 @@ repo.upsert_store(session, ..., region=region)
    python -m app.main --dashboard
    ```
 
-2. Open http://localhost:8000
+2. Open **http://localhost:8000/florida**
 
-3. Use the **Region** dropdown to select "Florida"
+3. Or navigate to root and click "Florida" in the top bar.
 
 4. Browse Florida-specific clearance deals!
 

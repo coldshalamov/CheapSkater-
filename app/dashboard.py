@@ -1255,17 +1255,28 @@ def _render_dashboard(
     *,
     scope: Scope,
     state: str | None,
-    category: str | None,
     region: str | None,
+    category: str | None,
     filters: dict[str, Any],
     session: Session,
+    page_title: str | None = None,
+    base_url: str = "/",
 ):
     LOGGER.debug(
-        "Rendering dashboard", extra={"scope": scope, "state": state, "category": category, "region": region}
+        "Rendering dashboard",
+        extra={"scope": scope, "state": state, "category": category, "region": region},
     )
-    raw_items = _select_items(session, scope=scope, state=None, category=category, region=region)
+    raw_items = _select_items(session, scope=scope, state=state if region != "FL" else None, category=category, region=region)
     prepared_items = _prepare_listings(raw_items)
-    state_filtered = _filter_by_state(prepared_items, state)
+    # If explicit state was passed (which we might not want if region is hardcoded), force it
+    # But wait, raw_items already filtered by region.
+    # We might still want to filter by state WITHIN the region (e.g. WA vs OR).
+    # For Florida, we don't need state filter if it's all FL.
+    
+    # Actually, _select_items handles the query.
+    # _filter_by_state is a post-filter on the list.
+    state_filtered = _filter_by_state(prepared_items, state if region == "WA_OR" else None)
+    
     items = _apply_filters(state_filtered, filters=filters)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
@@ -1278,7 +1289,7 @@ def _render_dashboard(
     )
     categories = _collect_categories(
         session,
-        state=state,
+        state=state if region == "WA_OR" else None,
         region=region,
         min_pct_off=filters.get("discount_min"),
         selected=category,
@@ -1298,6 +1309,12 @@ def _render_dashboard(
         except Exception:
             pass
 
+    # Default title
+    if not page_title:
+        page_title = "New Today" if scope == "new" else "Clearance Dashboard"
+        if region == "WA_OR":
+            page_title += " (Pacific NW)"
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -1310,10 +1327,13 @@ def _render_dashboard(
             "initial_batch_size": INITIAL_GROUP_BATCH,
             "active_scope": scope,
             "state": state or "ALL",
-            "region": region or "ALL",
+            "region": region or "WA_OR",
+            "current_region_slug": "florida" if region == "FL" else "wa_or",
+            "page_title": page_title,
+            "base_url": base_url,
             "category": category,
             "categories": categories,
-            "state_options": STATE_OPTIONS,
+            "state_options": STATE_OPTIONS if region == "WA_OR" else ["ALL", "FL"],
             "region_options": REGION_OPTIONS,
             "last_updated": last_updated,
             "state_from_zip": _state_from_zip,
@@ -1365,8 +1385,7 @@ def metrics() -> dict[str, Any]:
 @app.get("/")
 def list_clearance(
     request: Request,
-    state: str | None = Query(None, description="State filter (WA, OR, or FL)."),
-    region: str | None = Query(None, description="Region filter (WA_OR or FL)."),
+    state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
@@ -1386,7 +1405,7 @@ def list_clearance(
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
-    """Render the full clearance dashboard."""
+    """Render the Pacific NW (WA/OR) clearance dashboard."""
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
@@ -1405,18 +1424,17 @@ def list_clearance(
         request,
         scope="all",
         state=normalized_state,
-        region=region,
+        region="WA_OR",
         category=normalized_category,
         filters=filters,
         session=session,
+        base_url="",
     )
 
 
-@app.get("/new-today")
-def list_new_clearance_today(
+@app.get("/florida")
+def list_florida_clearance(
     request: Request,
-    state: str | None = Query(None, description="State filter (WA, OR, or FL)."),
-    region: str | None = Query(None, description="Region filter (WA_OR or FL)."),
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
@@ -1436,7 +1454,57 @@ def list_new_clearance_today(
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
-    """Render a page listing items that became clearance deals today."""
+    """Render the Florida clearance dashboard."""
+
+    normalized_category = category or None
+    filters = _normalize_filters(
+        time_window=time_window,
+        discount_filter=discount_filter,
+        discount_min=discount_min,
+        discount_max=discount_max,
+        stock_filter=stock_filter,
+        stock_min=stock_min,
+        stock_max=stock_max,
+        sort_order=sort_order,
+    )
+
+    return _render_dashboard(
+        request,
+        scope="all",
+        state="FL",
+        region="FL",
+        category=normalized_category,
+        filters=filters,
+        session=session,
+        page_title="Florida Clearance",
+        base_url="/florida",
+    )
+
+
+@app.get("/new-today")
+def list_new_clearance_today(
+    request: Request,
+    state: str | None = Query(None, description="State filter (WA or OR)."),
+    category: str | None = Query(None, description="Optional category filter."),
+    time_window: str = Query("all", description="Time filter window key."),
+    discount_filter: str | None = Query(
+        "50", description="Discount preset (percentage or custom)."
+    ),
+    discount_min: str | None = Query(
+        None, description="Custom minimum discount percentage."
+    ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
+    stock_filter: str | None = Query(
+        None, description="Stock preset (quantity or custom)."
+    ),
+    stock_min: str | None = Query(None, description="Custom minimum stock value."),
+    stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
+    session: Session = Depends(get_session),
+):
+    """Render new items for Pacific NW."""
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
@@ -1455,10 +1523,60 @@ def list_new_clearance_today(
         request,
         scope="new",
         state=normalized_state,
-        region=region,
+        region="WA_OR",
         category=normalized_category,
         filters=filters,
         session=session,
+        base_url="",
+    )
+
+
+@app.get("/florida/new-today")
+def list_florida_new_clearance_today(
+    request: Request,
+    category: str | None = Query(None, description="Optional category filter."),
+    time_window: str = Query("all", description="Time filter window key."),
+    discount_filter: str | None = Query(
+        "50", description="Discount preset (percentage or custom)."
+    ),
+    discount_min: str | None = Query(
+        None, description="Custom minimum discount percentage."
+    ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
+    stock_filter: str | None = Query(
+        None, description="Stock preset (quantity or custom)."
+    ),
+    stock_min: str | None = Query(None, description="Custom minimum stock value."),
+    stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    sort_order: str = Query("newest", description="Sort order key."),
+    session: Session = Depends(get_session),
+):
+    """Render new items for Florida."""
+
+    normalized_category = category or None
+    filters = _normalize_filters(
+        time_window=time_window,
+        discount_filter=discount_filter,
+        discount_min=discount_min,
+        discount_max=discount_max,
+        stock_filter=stock_filter,
+        stock_min=stock_min,
+        stock_max=stock_max,
+        sort_order=sort_order,
+    )
+
+    return _render_dashboard(
+        request,
+        scope="new",
+        state="FL",
+        region="FL",
+        category=normalized_category,
+        filters=filters,
+        session=session,
+        page_title="New Today (Florida)",
+        base_url="/florida",
     )
 
 

@@ -2,35 +2,27 @@
 {% block title %}{% if active_scope == 'new' %}New Today{% else %}Clearance Dashboard{% endif %}{% endblock %}
 {% block content %}
 <section class="dashboard">
-  <div class="dashboard-header"
-    style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem;">
-    <div class="heading-group">
-      <h1 style="font-family: var(--font-display); font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
-        {% if active_scope == 'new' %}New Today{% else %}All Clearance{% endif %}
-      </h1>
-      <p class="subtitle" style="color: var(--text-secondary); font-size: 1.1rem;">Real-time Lowe's building-material
-        clearance for Washington and Oregon.</p>
+  <div class="header">
+    <h1>{{ page_title }}</h1>
+    <div class="subtitle">
+      Tracking clearance items at <strong>{{ items|length }}</strong> unique listings across
+      {% if region == 'WA_OR' %}Washington & Oregon{% elif region == 'FL' %}Florida{% else %}all regions{% endif %}.
+      Last updated {{ last_updated.strftime('%I:%M %p') }} UTC.
     </div>
-    {% set params = [] %}
-    {% if state and state != 'ALL' %}{% set _ = params.append('state=' ~ state) %}{% endif %}
-    {% if category %}{% set _ = params.append('category=' ~ category|urlencode) %}{% endif %}
-    {% set query = '&'.join(params) %}
-    <div class="toolbar-actions" style="display: flex; gap: 0.75rem;">
-      <a class="btn btn-primary"
-        href="/export.xlsx?scope={{ active_scope }}{% if query %}&{{ query }}{% endif %}">Export to Excel</a>
+    <div class="nav-links">
+      <a class="nav-link{% if active_scope == 'all' %} active{% endif %}" href="{{ base_url or '/' }}">All Clearance</a>
+      <a class="nav-link{% if active_scope == 'new' %} active{% endif %}" href="{{ base_url }}/new-today">New
+        Today</a>
+      <a class="nav-link"
+        href="/export.xlsx?scope={{ active_scope }}&region={{ region }}{% if query %}&{{ query }}{% endif %}">Export to
+        Excel</a>
     </div>
   </div>
 
-  <form method="get" action="{{ request.url.path if request else '/' }}" class="filters-bar" role="search">
-    <div class="filter-group">
-      <label for="region" class="form-label">Region</label>
-      <select id="region" name="region">
-        {% for value, label in region_options %}
-        <option value="{{ value if value != 'ALL' else '' }}" {% if (region or 'ALL')==value %} selected{% endif %}>
-          {{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
+  <form method="get"
+    action="{% if active_scope == 'new' %}{{ base_url }}/new-today{% else %}{{ base_url or '/' }}{% endif %}"
+    class="filters-bar" role="search">
+    {% if region == 'WA_OR' %}
     <div class="filter-group">
       <label for="state" class="form-label">State</label>
       <select id="state" name="state">
@@ -40,6 +32,7 @@
         {% endfor %}
       </select>
     </div>
+    {% endif %}
     <div class="filter-group">
       <label for="category" class="form-label">Category</label>
       <select id="category" name="category">
