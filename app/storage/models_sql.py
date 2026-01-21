@@ -22,6 +22,7 @@ class Store(Base):
     city: Mapped[str | None] = mapped_column(String, nullable=True)
     state: Mapped[str | None] = mapped_column(String, nullable=True)
     zip: Mapped[str] = mapped_column(String, nullable=False)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Item(Base):
@@ -48,6 +49,7 @@ class Observation(Base):
     store_id: Mapped[str] = mapped_column(String, nullable=False)
     store_name: Mapped[str | None] = mapped_column(String, nullable=True)
     zip: Mapped[str | None] = mapped_column(String, nullable=True)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
     sku: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
@@ -65,6 +67,7 @@ class Observation(Base):
         Index("ix_observations_clearance_ts", "clearance", "ts_utc"),
         Index("ix_observations_category_clearance", "category", "clearance"),
         Index("ix_observations_zip_ts", "zip", "ts_utc"),
+        Index("ix_observations_region", "region"),
     )
 
 
@@ -116,6 +119,7 @@ class StorePriceHistory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     retailer: Mapped[str] = mapped_column(String, nullable=False)
     store_id: Mapped[str] = mapped_column(String, nullable=False)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
     sku: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)

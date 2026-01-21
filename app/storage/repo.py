@@ -50,16 +50,19 @@ def upsert_store(
     *,
     city: str | None = None,
     state: str | None = None,
+    region: str | None = None,
 ) -> Store:
     store = session.get(Store, store_id)
     if store is None:
-        store = Store(id=store_id, name=name, city=city, state=state, zip=zip_code)
+        store = Store(id=store_id, name=name, city=city, state=state, zip=zip_code, region=region)
         session.add(store)
     else:
         store.name = name
         store.city = city
         store.state = state
         store.zip = zip_code
+        if region is not None:
+            store.region = region
     session.flush()
     return store
 
@@ -140,6 +143,7 @@ def update_price_history(
     product_url: str,
     image_url: str | None,
     clearance: bool | None,
+    region: str | None = None,
 ) -> StorePriceHistory:
     """Record a compressed price history entry for a store listing."""
 
@@ -188,6 +192,7 @@ def update_price_history(
         product_url=product_url,
         image_url=image_url,
         clearance=clearance,
+        region=region,
     )
     session.add(entry)
     session.flush()
@@ -271,6 +276,7 @@ def _latest_history_statement(
     *,
     state: str | None = None,
     category: str | None = None,
+    region: str | None = None,
 ):
     history_alias = aliased(StorePriceHistory)
     partition_cols = (history_alias.store_id, history_alias.sku)
@@ -336,6 +342,9 @@ def _latest_history_statement(
     subquery = base.subquery()
     stmt = select(subquery).where(subquery.c.rn == 1).where(subquery.c.clearance.is_(True))
 
+    if region:
+        stmt = stmt.join(Store, Store.id == subquery.c.store_id, isouter=True)
+        stmt = stmt.where(Store.region == region)
     if state:
         stmt = stmt.where(
             func.upper(func.coalesce(subquery.c.store_state, "")) == state.upper()
@@ -403,11 +412,12 @@ def get_clearance_items(
     *,
     state: str | None = None,
     category: str | None = None,
+    region: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, object]]:
     """Return the latest clearance listings per store/SKU."""
 
-    stmt, subquery = _latest_history_statement(state=state, category=category)
+    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
     stmt = stmt.order_by(
         subquery.c.pct_off.desc().nullslast(),
         subquery.c.price.asc().nullslast(),
@@ -424,11 +434,12 @@ def get_new_clearance_today(
     *,
     state: str | None = None,
     category: str | None = None,
+    region: str | None = None,
 ) -> list[dict[str, object]]:
     """Return items that transitioned to clearance within the last 24 hours."""
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=1)
-    stmt, subquery = _latest_history_statement(state=state, category=category)
+    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
     stmt = stmt.where(subquery.c.price_started_at >= cutoff).where(
         or_(
             subquery.c.prev_clearance.is_(False),
@@ -448,6 +459,7 @@ def get_clearance_by_category(
     category: str,
     *,
     state: str | None = None,
+    region: str | None = None,
     limit: int | None = None,
 ) -> list[Observation]:
     """Return clearance observations filtered by category name."""
@@ -456,6 +468,7 @@ def get_clearance_by_category(
         session,
         state=state,
         category=category,
+        region=region,
         limit=limit,
     )
 
@@ -509,11 +522,11 @@ def get_latest_timestamp(session: Session) -> datetime | None:
 
 
 def list_distinct_categories(
-    session: Session, *, state: str | None = None, min_pct_off: float | None = None
+    session: Session, *, state: str | None = None, region: str | None = None, min_pct_off: float | None = None
 ) -> list[str]:
     """Return sorted list of categories with active clearance inventory."""
 
-    _, subquery = _latest_history_statement(state=state)
+    _, subquery = _latest_history_statement(state=state, region=region)
     stmt = (
         select(subquery.c.category)
         .where(subquery.c.rn == 1)

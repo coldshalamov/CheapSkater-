@@ -23,6 +23,15 @@
 
   <form method="get" action="{{ request.url.path if request else '/' }}" class="filters-bar" role="search">
     <div class="filter-group">
+      <label for="region" class="form-label">Region</label>
+      <select id="region" name="region">
+        {% for value, label in region_options %}
+        <option value="{{ value if value != 'ALL' else '' }}" {% if (region or 'ALL')==value %} selected{% endif %}>
+          {{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
       <label for="state" class="form-label">State</label>
       <select id="state" name="state">
         {% for option in state_options %}

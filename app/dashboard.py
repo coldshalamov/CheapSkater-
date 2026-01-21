@@ -138,7 +138,8 @@ async def not_found_handler(request: Request, exc: HTTPException) -> PlainTextRe
     )
 
 Scope = Literal["all", "new"]
-STATE_OPTIONS = ["ALL", "WA", "OR"]
+STATE_OPTIONS = ["ALL", "WA", "OR", "FL"]
+REGION_OPTIONS = [("ALL", "All Regions"), ("WA_OR", "Washington & Oregon"), ("FL", "Florida")]
 SORT_OPTIONS = [
     ("newest", "Newest first"),
     ("alpha_asc", "Title A → Z"),
@@ -1072,20 +1073,22 @@ def _select_items(
     scope: Scope,
     state: str | None,
     category: str | None,
+    region: str | None = None,
 ) -> list[dict[str, Any]]:
     if scope == "new":
-        return repo.get_new_clearance_today(session, state=state, category=category)
-    return repo.get_clearance_items(session, state=state, category=category)
+        return repo.get_new_clearance_today(session, state=state, category=category, region=region)
+    return repo.get_clearance_items(session, state=state, category=category, region=region)
 
 
 def _collect_categories(
     session: Session,
     *,
     state: str | None = None,
+    region: str | None = None,
     min_pct_off: float | None = None,
     selected: str | None = None,
 ) -> list[str]:
-    discovered = repo.list_distinct_categories(session, state=state, min_pct_off=min_pct_off)
+    discovered = repo.list_distinct_categories(session, state=state, region=region, min_pct_off=min_pct_off)
     merged = list(discovered)
     if selected:
         cleaned = selected.strip()
@@ -1253,13 +1256,14 @@ def _render_dashboard(
     scope: Scope,
     state: str | None,
     category: str | None,
+    region: str | None,
     filters: dict[str, Any],
     session: Session,
 ):
     LOGGER.debug(
-        "Rendering dashboard", extra={"scope": scope, "state": state, "category": category}
+        "Rendering dashboard", extra={"scope": scope, "state": state, "category": category, "region": region}
     )
-    raw_items = _select_items(session, scope=scope, state=None, category=category)
+    raw_items = _select_items(session, scope=scope, state=None, category=category, region=region)
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, state)
     items = _apply_filters(state_filtered, filters=filters)
@@ -1275,6 +1279,7 @@ def _render_dashboard(
     categories = _collect_categories(
         session,
         state=state,
+        region=region,
         min_pct_off=filters.get("discount_min"),
         selected=category,
     )
@@ -1305,9 +1310,11 @@ def _render_dashboard(
             "initial_batch_size": INITIAL_GROUP_BATCH,
             "active_scope": scope,
             "state": state or "ALL",
+            "region": region or "ALL",
             "category": category,
             "categories": categories,
             "state_options": STATE_OPTIONS,
+            "region_options": REGION_OPTIONS,
             "last_updated": last_updated,
             "state_from_zip": _state_from_zip,
             "store_url_builder": _store_specific_url,
@@ -1358,7 +1365,8 @@ def metrics() -> dict[str, Any]:
 @app.get("/")
 def list_clearance(
     request: Request,
-    state: str | None = Query(None, description="State filter (WA or OR)."),
+    state: str | None = Query(None, description="State filter (WA, OR, or FL)."),
+    region: str | None = Query(None, description="Region filter (WA_OR or FL)."),
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
@@ -1397,6 +1405,7 @@ def list_clearance(
         request,
         scope="all",
         state=normalized_state,
+        region=region,
         category=normalized_category,
         filters=filters,
         session=session,
@@ -1406,7 +1415,8 @@ def list_clearance(
 @app.get("/new-today")
 def list_new_clearance_today(
     request: Request,
-    state: str | None = Query(None, description="State filter (WA or OR)."),
+    state: str | None = Query(None, description="State filter (WA, OR, or FL)."),
+    region: str | None = Query(None, description="Region filter (WA_OR or FL)."),
     category: str | None = Query(None, description="Optional category filter."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
@@ -1445,6 +1455,7 @@ def list_new_clearance_today(
         request,
         scope="new",
         state=normalized_state,
+        region=region,
         category=normalized_category,
         filters=filters,
         session=session,
