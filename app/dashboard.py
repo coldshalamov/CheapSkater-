@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -60,6 +61,61 @@ app.include_router(auth_router)
 # Register notification routes for deal alerts
 from app.notifications.routes import router as notifications_router
 app.include_router(notifications_router)
+
+def _ensure_schema_up_to_date():
+    """Self-healing: Ensures database has the 'region' column required for Florida expansion."""
+    db_path = DATABASE_FILE
+    if not db_path.exists():
+        return
+    
+    LOGGER.info("Verifying database schema: %s", db_path)
+    # Give it a retry if locked
+    for i in range(3):
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(stores)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if "region" not in columns:
+                LOGGER.warning("Schema out of date: 'region' column missing. Running auto-migration...")
+                cursor.execute("ALTER TABLE stores ADD COLUMN region TEXT")
+                try:
+                    cursor.execute("ALTER TABLE observations ADD COLUMN region TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    cursor.execute("ALTER TABLE store_price_history ADD COLUMN region TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                
+                cursor.execute("""
+                    UPDATE stores 
+                    SET region = CASE 
+                        WHEN state IN ('WA', 'OR') THEN 'WA_OR'
+                        WHEN state = 'FL' THEN 'FL'
+                        ELSE NULL
+                    END
+                    WHERE region IS NULL
+                """)
+                conn.commit()
+                LOGGER.info("Auto-migration successful.")
+            else:
+                LOGGER.debug("Schema is up to date.")
+            conn.close()
+            break
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < 2:
+                time.sleep(1)
+                continue
+            LOGGER.error("Auto-migration database locked: %s", e)
+            break
+        except Exception as e:
+            LOGGER.exception("Auto-migration failed: %s", e)
+            break
+
+# Run self-healing check
+_ensure_schema_up_to_date()
 
 
 class IngestDeal(BaseModel):
