@@ -168,25 +168,23 @@ def test_list_distinct_categories_sorted(db_session) -> None:
     db_session.flush()
 
     categories = ["Drywall", "Roofing", "Roofing", "Insulation"]
+    ts_utc = datetime.now(timezone.utc) - timedelta(days=6)
     for idx, name in enumerate(categories, start=1):
-        db_session.add(
-            Observation(
-                ts_utc=datetime.now(timezone.utc),
-                store_id=store.id,
-                store_name=store.name,
-                zip=store.zip,
-                sku=f"sku-{idx}",
-                retailer="lowes",
-                title=f"Item {idx}",
-                category=name,
-                product_url=f"https://example.com/{idx}",
-                image_url=None,
-                price=10.0,
-                price_was=15.0,
-                pct_off=0.33,
-                clearance=True,
-                availability=None,
-            )
+        repo.update_price_history(
+            db_session,
+            retailer="lowes",
+            store_id=store.id,
+            sku=f"sku-{idx}",
+            title=f"Item {idx}",
+            category=name,
+            ts_utc=ts_utc,
+            price=10.0,
+            price_was=15.0,
+            pct_off=0.33,
+            availability=None,
+            product_url=f"https://example.com/{idx}",
+            image_url=None,
+            clearance=True,
         )
     db_session.commit()
 

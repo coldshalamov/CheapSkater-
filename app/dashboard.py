@@ -859,7 +859,7 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         "store_product_url": _store_specific_url(
             listing.get("product_url"), listing.get("store_id")
         ),
-        "image_url": listing.get("image_url"),
+        "image_url": _sanitize_image_url(listing.get("image_url")),
         "clearance": listing.get("clearance"),
         "first_seen": _ts(listing.get("first_seen")),
         "price_started_at": _ts(listing.get("price_started_at")),
@@ -898,13 +898,14 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sku = listing.get("sku") or listing.get("history_id")
         if not sku:
             continue
+        image_url = _sanitize_image_url(listing.get("image_url"))
         bucket = grouped.setdefault(
             sku,
             {
                 "sku": sku,
                 "title": listing.get("title"),
                 "category": listing.get("category"),
-                "image_url": listing.get("image_url"),
+                "image_url": image_url,
                 "stores": [],
                 "added_at": listing.get("first_seen") or listing.get("price_started_at"),
                 "last_seen": listing.get("updated_at") or listing.get("price_started_at"),
@@ -915,8 +916,8 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             bucket["title"] = listing.get("title")
         if not bucket["category"] and listing.get("category"):
             bucket["category"] = listing.get("category")
-        if not bucket["image_url"] and listing.get("image_url"):
-            bucket["image_url"] = listing.get("image_url")
+        if not bucket["image_url"] and image_url:
+            bucket["image_url"] = image_url
         listing_added = listing.get("first_seen") or listing.get("price_started_at")
         if listing_added and (
             not bucket["added_at"]
@@ -1203,22 +1204,37 @@ def _group_saved_deals(saved: dict[str, dict[str, Any]]) -> dict[str, list[dict[
     return dict(grouped)
 
 
-def _is_paid_user(session: Session, user: Any | None) -> bool:
+def _get_user_subscription_info(session: Session, user: Any | None) -> tuple[bool, str | None]:
+    """
+    Get user subscription information.
+
+    Returns:
+        tuple[bool, str | None]: (is_paid, plan_name)
+        - is_paid: True if user has active paid subscription
+        - plan_name: 'free', 'pro', 'premium', or None if no user
+    """
     try:
         if not user:
-            return False
+            return False, None
         from app.auth.models import Subscription, SubscriptionPlan
         sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
         if not sub:
             LOGGER.debug(f"User {user.email} has no subscription record")
-            return False
+            return False, 'free'
 
         is_paid = bool(sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription())
-        LOGGER.debug(f"User {user.email}: plan={sub.plan.value}, status={sub.status.value}, is_active={sub.is_active_subscription()}, is_paid={is_paid}")
-        return is_paid
+        plan_name = sub.plan.value
+        LOGGER.debug(f"User {user.email}: plan={plan_name}, status={sub.status.value}, is_active={sub.is_active_subscription()}, is_paid={is_paid}")
+        return is_paid, plan_name
     except Exception as e:
         LOGGER.error(f"Error checking paid user status: {e}", exc_info=True)
-        return False
+        return False, None
+
+
+def _is_paid_user(session: Session, user: Any | None) -> bool:
+    """Legacy function for backwards compatibility. Use _get_user_subscription_info instead."""
+    is_paid, _ = _get_user_subscription_info(session, user)
+    return is_paid
 
 
 def _select_items(
@@ -1449,9 +1465,9 @@ def _render_dashboard(
             LOGGER.error(f"Failed to load user from session: {e}")
             pass
 
-    is_pro = _is_paid_user(session, user)
+    is_pro, subscription_plan = _get_user_subscription_info(session, user)
     if user:
-        LOGGER.debug(f"User {user.email} is_pro={is_pro}")
+        LOGGER.debug(f"User {user.email} is_pro={is_pro}, plan={subscription_plan}")
 
     raw_items = _select_items(
         session,
@@ -1532,6 +1548,7 @@ def _render_dashboard(
             "stock_filter_options": STOCK_FILTER_OPTIONS,
             "sort_filter_options": SORT_OPTIONS,
             "is_pro": is_pro,
+            "subscription_plan": subscription_plan,
         },
     )
 

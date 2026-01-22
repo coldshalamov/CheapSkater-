@@ -38,9 +38,10 @@ def test_api_clearance_filters_state(tmp_path) -> None:
         session.add_all([store_wa, store_or])
         session.flush()
 
+        now = datetime.now(timezone.utc) - timedelta(days=6)
         obs_rows = [
             Observation(
-                ts_utc=datetime.now(timezone.utc),
+                ts_utc=now,
                 store_id=store_wa.id,
                 store_name=store_wa.name,
                 zip=store_wa.zip,
@@ -57,7 +58,7 @@ def test_api_clearance_filters_state(tmp_path) -> None:
                 availability="In stock",
             ),
             Observation(
-                ts_utc=datetime.now(timezone.utc),
+                ts_utc=now,
                 store_id=store_or.id,
                 store_name=store_or.name,
                 zip=store_or.zip,
@@ -116,7 +117,7 @@ def test_api_categories_returns_unique_sorted(tmp_path) -> None:
         session.add(store)
         session.flush()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc) - timedelta(days=6)
         obs_rows = [
             Observation(
                 ts_utc=now,
@@ -156,6 +157,25 @@ def test_api_categories_returns_unique_sorted(tmp_path) -> None:
         session.add_all(obs_rows)
         session.commit()
 
+        for obs in obs_rows:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+            )
+        session.commit()
+
     client = TestClient(app)
     response = client.get("/api/categories")
     assert response.status_code == 200
@@ -174,7 +194,7 @@ def test_api_deals_filters_by_category(tmp_path) -> None:
         session.add(store)
         session.flush()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc) - timedelta(days=6)
         obs_rows = [
             Observation(
                 ts_utc=now,
@@ -249,7 +269,7 @@ def test_api_sort_orders(tmp_path) -> None:
         session.execute(delete(Store))
         session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc) - timedelta(days=6)
         stores = []
         for idx in range(3):
             store = Store(

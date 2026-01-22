@@ -207,35 +207,12 @@ button {
     box-shadow: var(--shadow-sm);
 }
 
-/* Mobile Nav Adjustments */
+/* Mobile Nav Adjustments - Basic fallback (overridden by more specific rules below) */
 @media (max-width: 768px) {
-    .brand-logo {
-        position: relative;
-        top: 0;
-        left: 0;
-        height: 60px;
-        width: 60px;
-        margin-right: 12px;
-        border-width: 3px;
-    }
-
-    .nav-links {
-        margin-left: 0;
-        overflow-x: auto;
-        padding-bottom: 4px;
-        /* Scrollbar room */
-    }
-
     .site-header {
         height: auto;
         padding: 12px 0;
         border-radius: 0 0 16px 16px;
-    }
-
-    .site-header .container {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
     }
 }
 
@@ -919,4 +896,364 @@ input[type="search"]:focus {
 
 .plan-action {
     margin-top: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE-SPECIFIC FIXES
+   These styles ONLY affect mobile screens (max-width: 768px)
+   Desktop layout is unchanged
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* -----------------------------------------------------------------------------
+   1. PREVENT HORIZONTAL SCROLL ON MOBILE
+   Forces the entire page to be locked horizontally
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    html, body {
+        overflow-x: hidden;
+        width: 100%;
+        max-width: 100vw;
+    }
+
+    /* Ensure main container doesn't cause overflow */
+    .site-main {
+        overflow-x: hidden;
+        width: 100%;
+    }
+
+    .container {
+        padding: 0 16px;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   2. MOBILE HEADER & NAVIGATION FIXES
+   Prevents nav overflow and centers content properly
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .site-header {
+        overflow: hidden;
+        width: 100%;
+    }
+
+    .site-header .container {
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* Logo positioned properly */
+    .brand-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: auto;
+    }
+
+    .brand-logo {
+        position: relative;
+        top: 0;
+        left: 0;
+        height: 50px;
+        width: 50px;
+        margin: 0;
+        flex-shrink: 0;
+    }
+
+    /* Navigation: scrollable but hidden scrollbar, no overflow visible */
+    .nav-links {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 4px;
+        margin-left: 0;
+        padding: 0;
+        width: 100%;
+        justify-content: center;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        /* Hide scrollbar but allow scroll */
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .nav-links::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Smaller nav items on mobile to fit all */
+    .nav-link {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* Sign in button shrink */
+    .nav-links .btn {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   3. DASHBOARD HEADER ON MOBILE
+   Properly sized title and subscription badge
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .dashboard .header h1 {
+        font-size: 1.5rem;
+        line-height: 1.3;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    /* Subscription badge (Pro/Premium) wraps below title */
+    .dashboard .header h1 > span {
+        margin-left: 0 !important;
+        font-size: 0.7rem !important;
+        padding: 0.2rem 0.6rem !important;
+    }
+
+    .dashboard .header .subtitle {
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    /* Dashboard nav links */
+    .dashboard .header .nav-links {
+        justify-content: flex-start;
+        gap: 8px;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   4. FILTERS BAR MOBILE LAYOUT
+   Stack filters vertically on mobile
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .filters-bar {
+        flex-direction: column;
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .filter-group {
+        width: 100%;
+    }
+
+    .filter-group.search-field {
+        min-width: unset !important;
+    }
+
+    .filter-actions {
+        width: 100%;
+    }
+
+    .filter-actions .btn {
+        width: 100%;
+    }
+
+    select,
+    input[type="search"] {
+        min-width: unset;
+        width: 100%;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   5. DEAL CARDS GRID ON MOBILE
+   Single column, centered, no cutoff
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .deals-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 0;
+        width: 100%;
+    }
+
+    .card.deal-card {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        border-radius: var(--radius-lg);
+    }
+
+    /* Ensure discount badge is fully visible */
+    .deal-card__image {
+        position: relative;
+        padding: 16px;
+        overflow: visible;
+    }
+
+    /* Discount badge - ensure it's fully visible on mobile */
+    .deal-card__discount {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        left: auto;
+        z-index: 10;
+        font-size: 0.8rem;
+        padding: 4px 10px;
+        /* Prevent cutoff */
+        max-width: calc(100% - 24px);
+        box-sizing: border-box;
+    }
+
+    /* Card body padding for mobile */
+    .deal-card__body {
+        padding: 16px;
+    }
+
+    /* Pricing text size on mobile */
+    .deal-card__price {
+        font-size: 1.4rem;
+    }
+
+    .deal-card__was-price {
+        font-size: 0.9rem;
+    }
+
+    /* Card footer */
+    .deal-card__footer {
+        padding: 12px 16px;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   6. STORE CARDS ON MOBILE
+   Full width, properly contained
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .store-module {
+        margin-top: 12px;
+    }
+
+    .store-card {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .store-name-row {
+        font-size: 0.85rem;
+    }
+
+    .store-price-tag {
+        font-size: 0.8rem;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   7. INFO BANNERS ON MOBILE
+   Full width with proper padding
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .dashboard > div[style*="background:"] {
+        margin-left: 0;
+        margin-right: 0;
+        border-radius: var(--radius-md);
+        padding: 12px;
+        font-size: 0.85rem;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   8. TOAST NOTIFICATIONS ON MOBILE
+   Position at bottom center
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .toast-container {
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+    }
+
+    .toast {
+        width: 100%;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   9. MODAL ON MOBILE
+   Full width with proper margins
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .store-modal {
+        width: calc(100% - 32px);
+        max-width: 100%;
+        margin: 16px;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   10. ACCOUNT PAGE GRID ON MOBILE
+   Single column layout
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .account-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .account-card {
+        width: 100%;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   11. PRICING CARDS ON MOBILE
+   Stack vertically
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .pricing-grid {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+
+    .pricing-card.featured {
+        transform: none;
+    }
+
+    .pricing-card.featured:hover {
+        transform: translateY(-5px);
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   12. AUTH PAGES ON MOBILE
+   Full width forms
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .auth-page {
+        margin: 20px 16px;
+        max-width: 100%;
+    }
+
+    .auth-card {
+        padding: 24px;
+    }
+
+    .auth-title {
+        font-size: 1.5rem;
+    }
+}
+
+/* -----------------------------------------------------------------------------
+   13. FOOTER ON MOBILE
+   Reduced padding
+----------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .site-footer {
+        padding: 24px 16px;
+        font-size: 0.85rem;
+    }
 }
