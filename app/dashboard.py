@@ -831,6 +831,20 @@ def _state_from_zip(zip_code: str | None) -> str | None:
     return None
 
 
+def _calculate_discount_pct(price: float | None, price_was: float | None) -> float:
+    """Calculate discount percentage from price and price_was.
+
+    Returns a value 0-100. Returns 0 if prices are invalid or no discount.
+    """
+    if price is None or price_was is None:
+        return 0.0
+    if price_was <= 0 or price <= 0:
+        return 0.0
+    if price >= price_was:
+        return 0.0
+    return round(((price_was - price) / price_was) * 100.0, 2)
+
+
 def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
     def _ts(value: Any) -> str | None:
         if isinstance(value, datetime):
@@ -839,6 +853,17 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
             text = value.strip()
             return text or None
         return value
+
+    # Recalculate pct_off if it's missing/zero but we have valid prices
+    # This fixes data where pct_off was incorrectly stored as 0
+    stored_pct_off = listing.get("pct_off")
+    price = listing.get("price")
+    price_was = listing.get("price_was")
+
+    if (stored_pct_off is None or stored_pct_off == 0) and price and price_was:
+        effective_pct_off = _calculate_discount_pct(price, price_was)
+    else:
+        effective_pct_off = stored_pct_off
 
     payload = {
         "history_id": listing.get("history_id"),
@@ -853,7 +878,7 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         "category": listing.get("category"),
         "price": listing.get("price"),
         "price_was": listing.get("price_was"),
-        "pct_off": listing.get("pct_off"),
+        "pct_off": effective_pct_off,
         "availability": listing.get("availability"),
         "product_url": listing.get("product_url"),
         "store_product_url": _store_specific_url(
@@ -950,7 +975,18 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
         )
         prices = [row.get("price") for row in stores if row.get("price") is not None]
-        discounts = [row.get("pct_off") for row in stores if row.get("pct_off") is not None]
+        # Recalculate discounts if stored pct_off is 0 or missing but prices are valid
+        discounts = []
+        for row in stores:
+            stored_pct = row.get("pct_off")
+            price = row.get("price")
+            price_was = row.get("price_was")
+            if (stored_pct is None or stored_pct == 0) and price and price_was:
+                calc_pct = _calculate_discount_pct(price, price_was)
+                if calc_pct > 0:
+                    discounts.append(calc_pct)
+            elif stored_pct is not None and stored_pct > 0:
+                discounts.append(stored_pct)
         savings = []
         for row in stores:
             price = row.get("price")
