@@ -1534,14 +1534,18 @@ def _render_dashboard(
     state_filtered = _filter_by_state(prepared_items, state if region == "WA_OR" else None)
 
     items = _apply_filters(state_filtered, filters=filters)
+    # Count unique stores across all listings
+    unique_store_ids = {item.get("store_id") for item in items if item.get("store_id")}
+    store_count = len(unique_store_ids)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     serialized_groups = [_serialize_group(group) for group in grouped]
     initial_groups = serialized_groups[:INITIAL_GROUP_BATCH]
     LOGGER.info(
-        "Dashboard payload | groups=%s initial=%s",
+        "Dashboard payload | groups=%s initial=%s stores=%s",
         len(serialized_groups),
         len(initial_groups),
+        store_count,
     )
     categories = _collect_categories(
         session,
@@ -1564,6 +1568,7 @@ def _render_dashboard(
             "request": request,
             "user": user,
             "items": items,
+            "store_count": store_count,
             "groups": serialized_groups,
             "initial_groups": initial_groups,
             "group_json": json.dumps(serialized_groups, ensure_ascii=False),

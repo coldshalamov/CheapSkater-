@@ -38,8 +38,7 @@
         <div class="account-card">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <h2 style="font-size: 1.1rem; font-weight: 700;">Subscription</h2>
-                <span
-                    style="font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 100px;
+                <span style="font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 100px;
                     {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}
                     background: linear-gradient(135deg, #d4af37, #b8860b); color: #1a1f2e;
                     {% elif subscription and subscription.plan.value == 'pro' %}
@@ -66,15 +65,17 @@
                 </div>
 
                 <!-- Priority Support Banner for Premium -->
-                <div style="background: linear-gradient(145deg, #1a1f2e, #252b3d); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;">
+                <div
+                    style="background: linear-gradient(145deg, #1a1f2e, #252b3d); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;">
                     <p style="color: #d4af37; font-weight: 700; font-size: 0.9rem; margin-bottom: 0.5rem;">
                         ⭐ Priority Support
                     </p>
                     <p style="color: #a8b5c8; font-size: 0.85rem; margin-bottom: 0.75rem;">
                         As a Premium member, you get priority email support with guaranteed 24-hour response times.
                     </p>
-                    <a href="mailto:support@gloorbot.com" style="color: #d4af37; font-size: 0.9rem; text-decoration: none;">
-                        ✉️ support@gloorbot.com
+                    <a href="mailto:devteamrob.helix@gmail.com"
+                        style="color: #d4af37; font-size: 0.9rem; text-decoration: none;">
+                        ✉️ devteamrob.helix@gmail.com
                     </a>
                 </div>
 
@@ -100,7 +101,8 @@
                 <!-- Store Request for Pro -->
                 <div style="background: rgba(0,0,0,0.03); border-radius: 8px; padding: 0.75rem; margin-bottom: 1.5rem;">
                     <p style="color: var(--text-secondary); font-size: 0.85rem;">
-                        Don't see a store near you? <a href="mailto:stores@gloorbot.com" style="color: var(--accent-blue);">Email us</a> and we'll look into adding it!
+                        Don't see a store near you? <a href="mailto:stores@gloorbot.com"
+                            style="color: var(--accent-blue);">Email us</a> and we'll look into adding it!
                     </p>
                 </div>
 
@@ -116,7 +118,8 @@
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     <a href="/auth/pricing" class="btn btn-primary btn-block">Upgrade to Pro ($50/mo)</a>
                     <p style="text-align: center; font-size: 0.8rem; color: var(--text-muted);">
-                        Or go <a href="/auth/pricing" style="color: #d4af37;">Premium ($200/mo)</a> for unlimited alerts + priority support
+                        Or go <a href="/auth/pricing" style="color: #d4af37;">Premium ($200/mo)</a> for unlimited alerts
+                        + priority support
                     </p>
                 </div>
                 {% endif %}

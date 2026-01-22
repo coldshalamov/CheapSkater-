@@ -50,7 +50,7 @@ PLAN_CONFIG = {
         ],
         "cta_text": "Go Premium",
         "description": "For power users who want it all",
-        "support_email": "support@gloorbot.com",
+        "support_email": "devteamrob.helix@gmail.com",
     },
     # Legacy plans kept for backwards compatibility
     "basic": {

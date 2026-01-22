@@ -14,6 +14,7 @@
     </h1>
     <div class="subtitle">
       Tracking clearance items at <strong>{{ items|length }}</strong> unique listings across
+      <strong>{{ store_count }}</strong> Lowe's stores in
       {% if region == 'WA_OR' %}Washington & Oregon{% elif region == 'FL' %}Florida{% else %}all regions{% endif %}.
       {% if last_updated %}Last updated {{ format_regional_timestamp(last_updated, region) }}.{% else %}No data yet.{%
       endif %}
@@ -76,8 +77,9 @@
   {% if not is_pro %}
   <div
     style="background: #fffbeb; color: #92400e; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 2rem; border: 1px solid #fcd34d; font-size: 0.95rem; text-align: center;">
-    <strong>Limited Access:</strong> You are viewing older deals (5+ days). For live up-to-the-minute deals <a
-      href="/auth/pricing" style="color: #b45309; text-decoration: underline; font-weight: 700;">Upgrade to Pro</a>.
+    <strong>🔥 Deals this cheap go fast!</strong> <a
+      href="/auth/pricing" style="color: #b45309; text-decoration: underline; font-weight: 700;">Sign up for Pro</a> to see up-to-the-minute listings, or set up <a
+      href="/notifications/" style="color: #b45309; text-decoration: underline; font-weight: 700;">Email Alerts</a> to get notified the minute an item goes on sale!
   </div>
   {% endif %}
 
