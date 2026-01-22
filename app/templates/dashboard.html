@@ -87,7 +87,7 @@
           style="background: #f1f5f9; color: #94a3b8; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: 600;">
           No Image</div>
         {% endif %}
-        <div class="deal-card__discount">{{ (group.max_pct_off * 100)|int }}% OFF</div>
+        <div class="deal-card__discount">{{ group.max_pct_off|int }}% OFF</div>
       </div>
       <div class="deal-card__body">
         {% if group.category %}
@@ -102,9 +102,20 @@
           <a href="{{ group.best_product_url }}" target="_blank">{{ group.title }}</a>
         </h3>
         <div class="deal-card__pricing">
-          <span class="deal-card__price">${{ group.min_price }}</span>
-          <span class="deal-card__was-price">${{ group.min_price_was }}</span>
+          {% if group.price_spread and group.price_spread > 0.01 %}
+          <span class="deal-card__price">${{ "%.2f"|format(group.min_price) }} - ${{ "%.2f"|format(group.max_price) }}</span>
+          {% else %}
+          <span class="deal-card__price">${{ "%.2f"|format(group.min_price) }}</span>
+          {% endif %}
+          {% if group.min_price_was %}
+          <span class="deal-card__was-price">${{ "%.2f"|format(group.min_price_was) }}</span>
+          {% endif %}
         </div>
+        {% if group.discount_spread and group.discount_spread > 1 %}
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+          Discount: {{ group.min_pct_off|int }}% - {{ group.max_pct_off|int }}% off
+        </div>
+        {% endif %}
         <div class="store-module">
           {% if group.stores %}
           {% set primary_store = group.stores[0] %}

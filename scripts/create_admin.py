@@ -30,6 +30,10 @@ def create_admin_account():
         if existing_user:
             print(f'User already exists with ID: {existing_user.id}')
             user = existing_user
+            # Ensure admin flag is set
+            if not user.is_admin:
+                user.is_admin = True
+                print('Set is_admin flag to True')
         else:
             # Create user
             user = auth_service.register_user(
@@ -37,7 +41,9 @@ def create_admin_account():
                 password='Alphonse5150$',
                 display_name='Robin Gattis'
             )
-            print(f'Created new user with ID: {user.id}')
+            # Set admin flag
+            user.is_admin = True
+            print(f'Created new user with ID: {user.id} with admin privileges')
 
         # Check if subscription exists
         existing_sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()

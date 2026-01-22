@@ -933,9 +933,17 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
+    stores = group.get("stores", [])
+
+    # Get price_was from the store with min_price (stores are already sorted by price)
+    # This ensures we show the correct "was" price for the best deal
+    best_store = stores[0] if stores else None
+    best_price_was = best_store.get("price_was") if best_store else None
+
+    # Still collect all price_was values for range calculation
     price_was_values = [
         store.get("price_was")
-        for store in group.get("stores", [])
+        for store in stores
         if store.get("price_was") is not None
     ]
 
@@ -946,7 +954,8 @@ def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
         "image_url": group.get("image_url"),
         "min_price": group.get("min_price"),
         "max_price": group.get("max_price"),
-        "min_price_was": min(price_was_values) if price_was_values else None,
+        # Use the price_was from the best deal store, not the global minimum
+        "min_price_was": best_price_was,
         "max_price_was": max(price_was_values) if price_was_values else None,
         "min_pct_off": group.get("min_pct_off"),
         "max_pct_off": group.get("max_pct_off"),
@@ -961,7 +970,7 @@ def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
         "last_seen": group.get("last_seen").isoformat() if isinstance(group.get("last_seen"), datetime) else group.get("last_seen"),
         "days_since_added": group.get("days_since_added") or _relative_days(group.get("added_at")),
         "best_product_url": group.get("best_product_url"),
-        "stores": [_serialize_listing(store) for store in group.get("stores", [])],
+        "stores": [_serialize_listing(store) for store in stores],
     }
     return payload
 
