@@ -2089,6 +2089,60 @@ def ingest_data(
     return {"ok": True, "count": upserted_count, "skipped": skipped_count}
 
 
+@app.post("/api/setup-admin")
+def setup_admin_account(session: Session = Depends(get_session)) -> JSONResponse:
+    """
+    ONE-TIME ENDPOINT: Create admin account on production.
+    This endpoint should be removed after use for security.
+    """
+    from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
+    from app.auth.service import AuthService
+
+    try:
+        auth_service = AuthService(session)
+
+        # Check if user exists
+        existing_user = session.query(User).filter(User.email == '93robingattis@gmail.com').first()
+
+        if existing_user:
+            user = existing_user
+            message = f'User already exists with ID: {user.id}'
+        else:
+            # Create user
+            user = auth_service.register_user(
+                email='93robingattis@gmail.com',
+                password='Alphonse5150$',
+                display_name='Robin Gattis'
+            )
+            message = f'Created new user with ID: {user.id}'
+
+        # Check if subscription exists
+        existing_sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+
+        if existing_sub:
+            # Update to PRO
+            existing_sub.plan = SubscriptionPlan.PRO
+            existing_sub.status = SubscriptionStatus.ACTIVE
+            existing_sub.current_period_end = datetime.now(timezone.utc) + timedelta(days=365)
+            message += ' | Updated subscription to PRO'
+
+        session.commit()
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "message": message,
+                "email": "93robingattis@gmail.com",
+                "plan": "PRO",
+                "user_id": user.id,
+            }
+        )
+
+    except Exception as e:
+        session.rollback()
+        LOGGER.exception("Failed to create admin account")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
