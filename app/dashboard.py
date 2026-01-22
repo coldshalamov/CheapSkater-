@@ -1159,11 +1159,8 @@ def _select_items(
         if sub and sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription():
             has_paid_sub = True
 
-    # Free users only see deals 5+ days old
-    if not has_paid_sub:
-        return repo.get_older_clearance_items(session, state=state, category=category, region=region, min_days_old=5)
-
-    # Paid users see all deals
+    # Everyone sees all deals for now (free tier restriction removed for testing)
+    # TODO: Re-enable subscription gating after verifying data pipeline
     return repo.get_clearance_items(session, state=state, category=category, region=region)
 
 
