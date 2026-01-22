@@ -984,6 +984,18 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 calc_pct = _calculate_discount_pct(price, price_was)
                 if calc_pct > 0:
                     discounts.append(calc_pct)
+
+        # For the headline max discount, use the best store (lowest price) with its price_was
+        # This ensures the badge shows the actual best deal percentage
+        if stores:
+            best_store = min(stores, key=lambda r: r.get("price") or float("inf"))
+            best_price = best_store.get("price")
+            best_price_was = best_store.get("price_was")
+            if best_price and best_price_was and best_price_was > best_price:
+                best_discount = _calculate_discount_pct(best_price, best_price_was)
+                if best_discount > 0 and (not discounts or best_discount > max(discounts)):
+                    discounts.append(best_discount)
+
         savings = []
         for row in stores:
             price = row.get("price")
