@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - CheapSkater{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+        <p class="text-gray-600 mt-2">System monitoring and management</p>
+    </div>
+
+    <!-- Active System Messages -->
+    {% if system_messages %}
+    <div class="mb-6 space-y-2">
+        {% for msg in system_messages %}
+        <div class="p-4 rounded-lg border-l-4 {% if msg.message_type == 'error' %}bg-red-50 border-red-500 text-red-800{% elif msg.message_type == 'warning' %}bg-yellow-50 border-yellow-500 text-yellow-800{% elif msg.message_type == 'success' %}bg-green-50 border-green-500 text-green-800{% else %}bg-blue-50 border-blue-500 text-blue-800{% endif %}">
+            <div class="flex justify-between items-start">
+                <p>{{ msg.message }}</p>
+                <button onclick="deleteMessage({{ msg.id }})" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Add New System Message -->
+    <div class="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-4">Post System Message</h2>
+        <form id="messageForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                <textarea name="message" required class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="2" placeholder="Enter system-wide message..."></textarea>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                    <select name="message_type" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="error">Error</option>
+                        <option value="success">Success</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                    <input type="number" name="priority" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Expires in (hours)</label>
+                    <input type="number" name="expires_hours" placeholder="Never" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                </div>
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Post Message</button>
+        </form>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <!-- Active Scrapers -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Active Scrapers</p>
+                    <p class="text-3xl font-bold text-gray-900">{{ metrics.scrapers.active_count }}</p>
+                    <p class="text-xs text-gray-500 mt-1">of {{ metrics.scrapers.total_count }} total</p>
+                </div>
+                <div class="p-3 bg-green-100 rounded-full">
+                    <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ingestion Rate (Last Hour) -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Deals/Hour</p>
+                    <p class="text-3xl font-bold text-gray-900">{{ metrics.ingestion.last_hour.deals_per_hour }}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_hour.total_deals }} in last hour</p>
+                </div>
+                <div class="p-3 bg-blue-100 rounded-full">
+                    <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Users -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Total Users</p>
+                    <p class="text-3xl font-bold text-gray-900">{{ metrics.users.total }}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{ metrics.users.online }} online now</p>
+                </div>
+                <div class="p-3 bg-purple-100 rounded-full">
+                    <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 24h Deals -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">24h Deals</p>
+                    <p class="text-3xl font-bold text-gray-900">{{ metrics.ingestion.last_24_hours.total_deals }}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_24_hours.unique_stores }} stores</p>
+                </div>
+                <div class="p-3 bg-orange-100 rounded-full">
+                    <svg class="w-8 h-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scraper Details -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-xl font-semibold">Active Scrapers</h2>
+        </div>
+        <div class="p-6">
+            {% if metrics.scrapers.scrapers %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scraper</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Heartbeat</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deals (Session)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deals (Total)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for scraper in metrics.scrapers.scrapers %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900">{{ scraper.name }}</div>
+                                <div class="text-sm text-gray-500">{{ scraper.id }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                <span class="relative">{{ scraper.last_heartbeat }}</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ scraper.deals_session }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ scraper.deals_total }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm {% if scraper.errors > 0 %}text-red-600{% else %}text-gray-500{% endif %}">
+                                {{ scraper.errors }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ scraper.version or 'N/A' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-8">No active scrapers detected</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Top Discount Stores -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-xl font-semibold">Top Discount Stores (24h)</h2>
+        </div>
+        <div class="p-6">
+            {% if metrics.stores.top_discounts %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Store</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Discount</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deal Count</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for store in metrics.stores.top_discounts %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900">{{ store.store_name }}</div>
+                                <div class="text-sm text-gray-500">{{ store.store_id }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    {{ store.avg_discount }}%
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ store.deal_count }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ store.last_updated }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-8">No store data available</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <a href="/admin/users" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+            <h3 class="text-lg font-semibold mb-2">User Management</h3>
+            <p class="text-gray-600 text-sm">View and manage user accounts, subscriptions, and activity</p>
+        </a>
+        <a href="/" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+            <h3 class="text-lg font-semibold mb-2">Browse Deals</h3>
+            <p class="text-gray-600 text-sm">View live clearance deals from all stores</p>
+        </a>
+        <a href="/api/admin/metrics" target="_blank" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+            <h3 class="text-lg font-semibold mb-2">API Metrics</h3>
+            <p class="text-gray-600 text-sm">View raw JSON metrics data</p>
+        </a>
+    </div>
+</div>
+
+<script>
+async function deleteMessage(messageId) {
+    if (!confirm('Delete this system message?')) return;
+
+    try {
+        const response = await fetch(`/admin/api/system-message/${messageId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to delete message');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+document.getElementById('messageForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData(e.target);
+    const data = {
+        message: formData.get('message'),
+        message_type: formData.get('message_type'),
+        priority: parseInt(formData.get('priority') || '0'),
+        expires_hours: formData.get('expires_hours') ? parseInt(formData.get('expires_hours')) : null
+    };
+
+    try {
+        const response = await fetch('/admin/api/system-message', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to post message');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+});
+
+// Auto-refresh metrics every 30 seconds
+setInterval(() => {
+    location.reload();
+}, 30000);
+</script>
+{% endblock %}

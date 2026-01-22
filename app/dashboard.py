@@ -67,6 +67,10 @@ app.include_router(notifications_router)
 from app.assistant.routes import router as assistant_router
 app.include_router(assistant_router)
 
+# Register admin routes for system management
+from app.admin.routes import router as admin_router
+app.include_router(admin_router)
+
 def _ensure_schema_up_to_date():
     """Self-healing: Ensures database has the 'region' column required for Florida expansion."""
     db_path = DATABASE_FILE
@@ -126,7 +130,58 @@ def _ensure_schema_up_to_date():
             break
 
 # Run self-healing check
+# Run self-healing check
 _ensure_schema_up_to_date()
+
+
+def _ensure_admin_permissions():
+    """Self-healing: Ensures the primary admin account has correct permissions and subscription."""
+    target_email = "93robingattis@gmail.com"
+    
+    try:
+        from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
+        
+        # Use a fresh session directly
+        with session_factory() as session:
+            user = session.query(User).filter(User.email == target_email).first()
+            if not user:
+                return
+
+            changes_made = False
+            
+            # 1. Ensure Admin Status
+            if not user.is_admin:
+                user.is_admin = True
+                changes_made = True
+                LOGGER.info(f"Upgraded {target_email} to Admin.")
+
+            # 2. Ensure Subscription Status
+            sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+            if not sub:
+                sub = Subscription(
+                    user_id=user.id,
+                    plan=SubscriptionPlan.PREMIUM,
+                    status=SubscriptionStatus.ACTIVE,
+                    # is_active property is derived, not stored
+                )
+                session.add(sub)
+                changes_made = True
+                LOGGER.info(f"Created Premium subscription for {target_email}.")
+            else:
+                if sub.plan != SubscriptionPlan.PREMIUM or sub.status != SubscriptionStatus.ACTIVE:
+                    sub.plan = SubscriptionPlan.PREMIUM
+                    sub.status = SubscriptionStatus.ACTIVE
+                    changes_made = True
+                    LOGGER.info(f"Restored Premium subscription for {target_email}.")
+
+            if changes_made:
+                session.commit()
+                LOGGER.info(f"Admin permissions enforced for {target_email}")
+                
+    except Exception as e:
+        LOGGER.exception(f"Failed to enforce admin permissions: {e}")
+
+_ensure_admin_permissions()
 
 
 class IngestDeal(BaseModel):
@@ -179,6 +234,10 @@ def _sanitize_image_url(value: str | None) -> str | None:
 SESSION_SECRET = os.getenv("CHEAPSKATER_SESSION_SECRET", "cheapskater-session-secret")
 SESSION_MAX_AGE = int(os.getenv("CHEAPSKATER_SESSION_MAX_AGE", str(60 * 60 * 24 * 30)))
 app.add_middleware(SimpleSessionMiddleware, secret_key=SESSION_SECRET, max_age=SESSION_MAX_AGE)
+
+# Add user activity tracking middleware
+from app.admin.middleware import UserActivityMiddleware
+app.add_middleware(UserActivityMiddleware, database_file=str(DATABASE_FILE))
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

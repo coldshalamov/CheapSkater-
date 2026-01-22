@@ -183,7 +183,7 @@ async def login(
     db_session = next(_get_db_session())
     try:
         auth_service = AuthService(db_session)
-        
+
         try:
             user = auth_service.authenticate(email, password)
         except InvalidCredentials:
@@ -191,11 +191,15 @@ async def login(
                 url=f"/auth/login?error=Invalid+email+or+password&next={next_url}",
                 status_code=303,
             )
-        
+
+        # Update last_login_at
+        user.last_login_at = datetime.now(timezone.utc)
+        db_session.commit()
+
         # Store user in session
         request.scope["session"]["user_id"] = user.id
         request.scope["session"]["email"] = user.email
-        
+
         return RedirectResponse(url=next_url, status_code=303)
     finally:
         db_session.close()

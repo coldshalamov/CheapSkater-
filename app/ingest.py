@@ -170,6 +170,8 @@ def ingest_deals(
     x_api_key: str = Header(default="", alias="X-API-Key"),
     x_gloorbot_batch_id: str = Header(default="", alias="X-Gloorbot-Batch-Id"),
     x_gloorbot_client_id: str = Header(default="", alias="X-Gloorbot-Client-Id"),
+    x_gloorbot_version: str = Header(default="", alias="X-Gloorbot-Version"),
+    x_gloorbot_hostname: str = Header(default="", alias="X-Gloorbot-Hostname"),
 ):
     """Receive deals from Gloorbot and insert into Cheapskater database."""
 
@@ -254,6 +256,23 @@ def ingest_deals(
             continue
 
     session.commit()
+
+    # Update scraper heartbeat
+    if client_id:
+        try:
+            from app.admin.service import AdminService
+            admin_service = AdminService(session)
+            admin_service.update_heartbeat(
+                scraper_id=client_id,
+                scraper_name=f"Gloorbot-{client_id}",
+                deals_count=accepted,
+                errors_count=errors,
+                status_message=f"Batch {batch_id}: {accepted} deals accepted, {errors} errors",
+                version=x_gloorbot_version or None,
+                hostname=x_gloorbot_hostname or None,
+            )
+        except Exception as e:
+            LOGGER.warning("[INGEST] batch_id=%s Failed to update heartbeat: %s", batch_id, e)
 
     # Trigger notification processing for instant alerts
     if accepted > 0:

@@ -1,66 +1,66 @@
-# CheapSkater - Agent Instructions
+# Lowebot (formerly CheapSkater) - Agent Instructions
 
 ## System Overview
 
-**CheapSkater** is a distributed Lowe's clearance tracking system with two separate components:
+**Lowebot** is a distributed Lowe's clearance tracking system split across two repositories:
 
-1. **Dashboard/API** (this repository) - FastAPI web app hosted on Render.com
-2. **Gloorbot Scraper** (separate repository) - Playwright-based scraper that sends deals via API
+1.  **Dashboard/Site** (This Repo: `D:\GitHub\Telomere\CheapSkater-`)
+    *   **Role**: The "Frontend" or "Site". Hosts the web dashboard, user authentication, and the ingestion API.
+    *   **Tech**: FastAPI, Jinja2.
 
-## Critical: What This Repo Contains
+2.  **Scraper/Coordinator** (Other Repo: `D:\GitHub\Telomere\Gloorbot`)
+    *   **Role**: The "Backend" or "Scraper". Runs the Playwright bots, coordinates jobs, and sends data to the Dashboard.
+    *   **Tech**: Python, Playwright.
 
-### ✅ This Repository Has:
-- FastAPI web dashboard for browsing deals
-- User authentication and session management
-- Stripe subscription integration ($50/mo Pro, $10/mo per alert)
-- Email alert system (SendGrid)
-- API endpoint: `POST /api/ingest/deals` (receives deals from Gloorbot)
-- Jinja2 templates and static assets (CSS/JS)
+## Critical: Repository Boundaries
+
+### ✅ This Repository (`CheapSkater-`) Has:
+- **The Website**: `dashboard.py`, templates, CSS.
+- **The Receiver API**: `ingest.py` (receives data from Gloorbot).
+- **User Auth**: Stripe, Login, Admin logic.
+- **Notifications**: Email alerts service.
 
 ### ❌ This Repository Does NOT Have:
-- **The scraper** - Gloorbot lives in a separate repo
-- **Production database** - Stored on Render.com's paid persistent disk
-- **Scraping/automation code** - That's in the Gloorbot repo
+- **The Scraper Logic**: That is in `D:\GitHub\Telomere\Gloorbot`.
+- **The Coordinator**: Also in `Gloorbot`.
+- **Production Database**: Stored on Render persistent disk (download to view locally).
 
 ## Architecture Diagram
 
 ```
-┌──────────────────────┐
-│  Gloorbot Scraper    │  (Separate Repo)
-│  - Playwright        │
-│  - Store scanning    │
-└──────────┬───────────┘
-           │
-           │ POST /api/ingest/deals
-           │ (with CHEAPSKATER_INGEST_API_KEY)
-           ▼
-┌──────────────────────────────┐
-│  CheapSkater Dashboard       │  (This Repo)
-│  ┌────────────────────────┐  │
-│  │  FastAPI Backend       │  │
-│  │  - /api/ingest/deals   │  │
-│  │  - Auth & Stripe       │  │
-│  │  - Alert matching      │  │
-│  └───────────┬────────────┘  │
-│              │                │
-│  ┌───────────▼────────────┐  │
-│  │  SQLite Database       │  │
-│  │  (Render Persistent)   │  │
-│  └────────────────────────┘  │
-└──────────────┬───────────────┘
-               │
-               ▼
-          Web Users
+┌───────────────────────────────────────┐
+│  Gloorbot Scraper / Coordinator       │
+│  (Path: D:\GitHub\Telomere\Gloorbot)  │
+│  - Playwright Scrapers                │
+│  - Orchestrator Backend               │
+└──────────────────┬────────────────────┘
+                   │
+                   │ POST /api/ingest/deals
+                   │ (Data Pushed to Dashboard)
+                   ▼
+┌───────────────────────────────────────┐
+│  Lowebot Dashboard / Site             │
+│  (Path: D:\GitHub\Telomere\CheapSkater-)
+│  ┌────────────────────────┐           │
+│  │  FastAPI Ingest API    │           │
+│  │  Auth & Web UI         │           │
+│  └───────────┬────────────┘           │
+│              │                        │
+│  ┌───────────▼────────────┐           │
+│  │  SQLite Database       │           │
+│  │  (Render Persistent)   │           │
+│  └────────────────────────┘           │
+└───────────────────────────────────────┘
 ```
 
 ## Why Local Database is Empty
 
-**Expected Behavior**: When running locally, the database will be empty.
+**Expected Behavior**: When running `dashboard.py` locally, the database is empty.
 
-**Reason**: 
-- Production data lives on Render's paid persistent disk
-- Gloorbot scraper is a separate service that sends deals via API
-- Local and production databases are completely separate
+**Reason**:
+- Production data lives on Render.
+- The Scraper (Gloorbot) runs in a separate process/server.
+- They are decoupled systems connected by the API.
 
 **To populate local database**:
 1. Add test data manually with scripts

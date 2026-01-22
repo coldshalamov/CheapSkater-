@@ -2,27 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is
+## System Overview: Lowebot (formerly CheapSkater)
 
-**CheapSkater** (aka **GloorBot**) is a two-component clearance deal tracking system:
+**Lowebot** is a dual-repository clearance deal tracking system:
 
-1. **This Repository**: FastAPI web dashboard + API ingestion endpoint
-2. **Separate Gloorbot Scraper**: Playwright-based automation (different repo)
+1.  **Dashboard Repository** (This Repo: `CheapSkater-`):
+    *   **Role**: User-Facing Website, Frontend Dashboard, Authentication, and Ingestion API.
+    *   **Path**: `D:\GitHub\Telomere\CheapSkater-`
+    *   **Tech**: FastAPI, Jinja2, SQLite, Stripe.
 
-**Critical**: The scraper lives in a separate repository. This repo only contains the dashboard, authentication, and API endpoints.
+2.  **Scraper/Coordinator Repository** (Other Repo: `Gloorbot`):
+    *   **Role**: Backend Scraper Logic, Automation Coordinator, Playwright Bots.
+    *   **Path**: `D:\GitHub\Telomere\Gloorbot`
+    *   **Tech**: Python, Playwright, Apify Actor logic.
+
+**CRITICAL**: When the user mentions "Backend", "Scraper", or "Coordinator", they are referring to the **Gloorbot** repository. When they mention "Frontend", "Dashboard", or "Site", they refer to **this** repository.
 
 ## Data Flow Architecture
 
 ```
-Gloorbot Scraper (separate repo)
+Gloorbot Scraper (D:\GitHub\Telomere\Gloorbot)
          ↓
-POST /api/ingest/deals (API key auth)
+         | COORDINATES & SCRAPES
          ↓
-This Dashboard Repo (FastAPI)
+POST /api/ingest/deals (Ingest API in THIS repo)
          ↓
-SQLite Database
+Lowebot Dashboard (D:\GitHub\Telomere\CheapSkater-)
          ↓
-Users browse deals via web UI
+SQLite Database (Render Persistent Disk)
+         ↓
+Users browse deals via Web UI
 ```
 
 ## Running Locally
