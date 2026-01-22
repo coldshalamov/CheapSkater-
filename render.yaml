@@ -7,7 +7,7 @@ services:
     startCommand: uvicorn app.dashboard:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: CHEAPSKATER_DB_PATH
-        value: /var/data/clean_db_v6.sqlite
+        value: /var/data/orwa_lowes.sqlite
       - key: CHEAPSKATER_SESSION_SECRET
         generateValue: true
       - key: CHEAPSKATER_INGEST_API_KEY
