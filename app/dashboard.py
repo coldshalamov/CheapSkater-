@@ -1209,9 +1209,15 @@ def _is_paid_user(session: Session, user: Any | None) -> bool:
             return False
         from app.auth.models import Subscription, SubscriptionPlan
         sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
-        return bool(sub and sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription())
+        if not sub:
+            LOGGER.debug(f"User {user.email} has no subscription record")
+            return False
+
+        is_paid = bool(sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription())
+        LOGGER.debug(f"User {user.email}: plan={sub.plan.value}, status={sub.status.value}, is_active={sub.is_active_subscription()}, is_paid={is_paid}")
+        return is_paid
     except Exception as e:
-        LOGGER.error(f"Error checking paid user status: {e}")
+        LOGGER.error(f"Error checking paid user status: {e}", exc_info=True)
         return False
 
 
@@ -1437,10 +1443,15 @@ def _render_dashboard(
         try:
             from app.auth.service import AuthService
             user = AuthService(session).get_user_by_id(session_data["user_id"])
-        except Exception:
+            if user:
+                LOGGER.debug(f"Loaded user {user.email} (ID: {user.id}) from session")
+        except Exception as e:
+            LOGGER.error(f"Failed to load user from session: {e}")
             pass
 
     is_pro = _is_paid_user(session, user)
+    if user:
+        LOGGER.debug(f"User {user.email} is_pro={is_pro}")
 
     raw_items = _select_items(
         session,
