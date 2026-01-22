@@ -312,6 +312,8 @@ button {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 24px;
+    align-items: stretch;
+    /* Cards in same row match height */
 }
 
 .card {
@@ -323,6 +325,8 @@ button {
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     position: relative;
+    display: flex;
+    flex-direction: column;
 }
 
 .card:hover {
@@ -373,6 +377,10 @@ button {
 /* Card Body */
 .deal-card__body {
     padding: 20px;
+    flex: 1;
+    /* Grows to fill available space */
+    display: flex;
+    flex-direction: column;
 }
 
 .category-chip {
@@ -398,8 +406,14 @@ button {
     font-size: 1.1rem;
     font-weight: 700;
     margin-bottom: 12px;
-    height: 3.2em;
-    /* ~2 lines */
+    min-height: 2.6em;
+    /* Minimum ~2 lines, but grows for longer titles */
+    line-height: 1.3;
+    /* Tighter line height for multi-line titles */
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    /* Allow up to 4 lines before truncating */
+    -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
