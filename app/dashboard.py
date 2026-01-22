@@ -88,20 +88,26 @@ def _ensure_schema_up_to_date():
                     cursor.execute("ALTER TABLE store_price_history ADD COLUMN region TEXT")
                 except sqlite3.OperationalError:
                     pass
-                
-                cursor.execute("""
-                    UPDATE stores 
-                    SET region = CASE 
-                        WHEN state IN ('WA', 'OR') THEN 'WA_OR'
-                        WHEN state = 'FL' THEN 'FL'
-                        ELSE NULL
-                    END
-                    WHERE region IS NULL
-                """)
                 conn.commit()
                 LOGGER.info("Auto-migration successful.")
+            
+            # Always run region backfill/repair on startup
+            # This fixes cases where stores were added (e.g. via ingest) without a region
+            cursor.execute("""
+                UPDATE stores 
+                SET region = CASE 
+                    WHEN state IN ('WA', 'OR') THEN 'WA_OR'
+                    WHEN state = 'FL' THEN 'FL'
+                    ELSE NULL
+                END
+                WHERE region IS NULL OR region = ''
+            """)
+            if cursor.rowcount > 0:
+                conn.commit()
+                LOGGER.info(f"Repaired regions for {cursor.rowcount} stores.")
             else:
-                LOGGER.debug("Schema is up to date.")
+                LOGGER.debug("No region repairs needed.")
+
             conn.close()
             break
         except sqlite3.OperationalError as e:
@@ -1876,6 +1882,23 @@ def api_stats(session: Session = Depends(get_session)) -> JSONResponse:
     return JSONResponse(content=payload)
 
 
+def _parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
+    """Parse store_name to extract city and state.
+    
+    Examples:
+        "Seattle, WA (#0001)" -> city="Seattle", state="WA"
+        "Portland #1234" -> city="Portland", state=""
+    """
+    city = ""
+    state = ""
+    match = re.match(r'^([^,]+),\s*([A-Z]{2})', store_name)
+    if match:
+        city = match.group(1).strip()
+        state = match.group(2).strip()
+    else:
+        city = re.sub(r'\s*[#(].*', '', store_name).strip()
+    return {"city": city, "state": state}
+
 @app.post("/api/ingest")
 def ingest_data(
     payload: IngestRequest,
@@ -1904,11 +1927,24 @@ def ingest_data(
         store_zip = "00000"
         store_city = None
         store_state = None
+        store_region = None
         
         if store_details:
              store_zip = store_details.get("zip") or "00000"
              store_city = store_details.get("city")
              store_state = store_details.get("state")
+             if store_state in ("WA", "OR"):
+                 store_region = "WA_OR"
+        else:
+             # Fallback: Parse from Gloorbot provided name (critical for FL stores)
+             parsed = _parse_store_info(store_id, deal.store_name)
+             store_city = parsed["city"]
+             store_state = parsed["state"]
+             
+             if store_state == "FL":
+                 store_region = "FL"
+             elif store_state in ("WA", "OR"):
+                 store_region = "WA_OR"
         
         # Ensure Store exists
         repo.upsert_store(
@@ -1917,7 +1953,8 @@ def ingest_data(
             name=deal.store_name, 
             zip_code=store_zip,
             city=store_city,
-            state=store_state
+            state=store_state,
+            region=store_region
         )
 
         preferred_category = (deal.category_name or "").strip()

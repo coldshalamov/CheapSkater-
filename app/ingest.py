@@ -189,12 +189,17 @@ def ingest_deals(
             # Ensure store exists
             store = session.get(Store, deal.store_id)
             if store is None:
+                # Determine region based on state
+                state = store_info["state"]
+                region = "FL" if state == "FL" else ("WA_OR" if state in ("WA", "OR") else None)
+
                 store = Store(
                     id=deal.store_id,
                     name=deal.store_name,
                     city=store_info["city"],
-                    state=store_info["state"],
+                    state=state,
                     zip="",  # Not available from Gloorbot
+                    region=region,
                 )
                 session.add(store)
                 session.flush()

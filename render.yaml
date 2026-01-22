@@ -4,9 +4,10 @@ services:
     env: docker
     plan: starter
     healthCheckPath: /healthz
+    startCommand: uvicorn app.dashboard:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: CHEAPSKATER_DB_PATH
-        value: /var/data/orwa_lowes.sqlite
+        value: /var/data/clean_db_v6.sqlite
       - key: CHEAPSKATER_SESSION_SECRET
         generateValue: true
       - key: CHEAPSKATER_INGEST_API_KEY
