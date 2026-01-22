@@ -33,3 +33,4 @@ __pycache__/
 # Stray logs outside /logs
 *.log
 .kilocode/mcp.json
+nul

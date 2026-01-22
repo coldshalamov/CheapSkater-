@@ -118,6 +118,26 @@ def extract_category_from_url(category_url: str) -> str:
     return "Clearance"
 
 
+def _calculate_discount_percent(price: float, was_price: float) -> float:
+    """Calculate accurate discount percentage.
+    
+    Args:
+        price: Current sale price
+        was_price: Original price
+        
+    Returns:
+        Discount percentage (0-100), clamped to valid range
+    """
+    if was_price <= 0 or price <= 0:
+        return 0.0
+    if price >= was_price:
+        return 0.0
+    
+    discount = ((was_price - price) / was_price) * 100.0
+    # Clamp to 0-100 range
+    return max(0.0, min(100.0, discount))
+
+
 def _resolve_category(deal: GloorbotDeal) -> str:
     preferred = (deal.category_name or "").strip()
     if preferred:
@@ -178,7 +198,11 @@ def ingest_deals(
                 continue
 
             category = _resolve_category(deal)
-            store_info = parse_store_info(deal.store_id, deal.store_name)       
+            store_info = parse_store_info(deal.store_id, deal.store_name)
+            
+            # Recalculate discount percentage for accuracy
+            # (don't trust the pct_off from Gloorbot, it can be wrong)
+            actual_pct_off = _calculate_discount_percent(deal.price, deal.was_price)
 
             # Parse timestamp
             try:
@@ -215,7 +239,7 @@ def ingest_deals(
                 ts_utc=ts,
                 price=deal.price,
                 price_was=deal.was_price,
-                pct_off=deal.pct_off,
+                pct_off=actual_pct_off,  # Use recalculated value
                 availability="In Stock",
                 product_url=deal.product_url,
                 image_url=deal.image_url,
@@ -241,6 +265,7 @@ def ingest_deals(
                 sku = extract_sku_from_url(deal.product_url)
                 if sku:
                     store_info = parse_store_info(deal.store_id, deal.store_name)
+                    actual_pct_off = _calculate_discount_percent(deal.price, deal.was_price)
                     notifiable_deals.append({
                         "sku": sku,
                         "store_id": deal.store_id,
@@ -252,7 +277,7 @@ def ingest_deals(
                         "category": _resolve_category(deal),
                         "price": deal.price,
                         "price_was": deal.was_price,
-                        "pct_off": deal.pct_off,
+                        "pct_off": actual_pct_off,  # Use recalculated value
                         "product_url": deal.product_url,
                         "image_url": deal.image_url,
                     })

@@ -602,6 +602,16 @@ input[type="search"]:focus {
     align-items: center;
     gap: 6px;
     font-size: 0.9rem;
+    flex-wrap: wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.store-name {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .store-icon {
@@ -634,6 +644,16 @@ input[type="search"]:focus {
     font-size: 0.75rem;
 }
 
+.store-price-tag {
+    background: var(--accent-blue-soft);
+    color: var(--accent-blue-dark);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
 .copy-hint {
     position: absolute;
     right: 10px;
@@ -662,19 +682,21 @@ input[type="search"]:focus {
     width: 100%;
     background: none;
     border: none;
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    font-weight: 600;
+    color: var(--accent-blue);
+    font-size: 0.95rem;
+    font-weight: 700;
     cursor: pointer;
-    padding: 6px;
+    padding: 8px;
     text-align: left;
     display: flex;
     align-items: center;
     gap: 4px;
+    transition: all 0.2s ease;
 }
 
 .btn-toggle-stores:hover {
-    color: var(--accent-blue);
+    color: var(--accent-blue-dark);
+    text-decoration: underline;
 }
 
 .btn-toggle-stores::after {

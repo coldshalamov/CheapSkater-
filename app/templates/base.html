@@ -14,6 +14,7 @@
         href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/store-modal.css') }}">
     {% block extra_head %}{% endblock %}
 </head>
 
@@ -51,7 +52,7 @@
 
     <footer class="site-footer">
         <div class="container">
-            <p>&copy; {{ now.year if now else '2026' }} GloorBot. Tracking Lowe's Clearance across WA & OR.</p>
+            <p>&copy; {{ now.year if now else '2026' }} GloorBot. Tracking Lowe's Clearance across America.</p>
         </div>
     </footer>
     {% block extra_scripts %}{% endblock %}

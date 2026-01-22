@@ -62,6 +62,10 @@ app.include_router(auth_router)
 from app.notifications.routes import router as notifications_router
 app.include_router(notifications_router)
 
+# Register AI assistant routes (unlisted subsite)
+from app.assistant.routes import router as assistant_router
+app.include_router(assistant_router)
+
 def _ensure_schema_up_to_date():
     """Self-healing: Ensures database has the 'region' column required for Florida expansion."""
     db_path = DATABASE_FILE
@@ -166,7 +170,8 @@ def _sanitize_image_url(value: str | None) -> str | None:
         return None
     if lowered.endswith(".svg"):
         return None
-    if any(token in lowered for token in ("badge", "sprite", "icon")):
+    # Filter out badge/icon images including clearance tags
+    if any(token in lowered for token in ("badge", "sprite", "icon", "clearance")):
         return None
     return cleaned
 
@@ -1136,9 +1141,29 @@ def _select_items(
     state: str | None,
     category: str | None,
     region: str | None = None,
+    user = None,
 ) -> list[dict[str, Any]]:
+    """
+    Get clearance items based on scope and user subscription tier.
+    Free tier: only sees deals 5+ days old
+    Pro/Paid tier: sees all deals
+    """
     if scope == "new":
         return repo.get_new_clearance_today(session, state=state, category=category, region=region)
+
+    # Check if user has paid subscription
+    has_paid_sub = False
+    if user:
+        from app.auth.models import Subscription, SubscriptionPlan
+        sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+        if sub and sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription():
+            has_paid_sub = True
+
+    # Free users only see deals 5+ days old
+    if not has_paid_sub:
+        return repo.get_older_clearance_items(session, state=state, category=category, region=region, min_days_old=5)
+
+    # Paid users see all deals
     return repo.get_clearance_items(session, state=state, category=category, region=region)
 
 
@@ -1328,17 +1353,31 @@ def _render_dashboard(
         "Rendering dashboard",
         extra={"scope": scope, "state": state, "category": category, "region": region},
     )
-    raw_items = _select_items(session, scope=scope, state=state if region != "FL" else None, category=category, region=region)
+
+    # Get user from session FIRST so we can use it for data filtering
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
+
+    raw_items = _select_items(session, scope=scope, state=state if region != "FL" else None, category=category, region=region, user=user)
     prepared_items = _prepare_listings(raw_items)
     # If explicit state was passed (which we might not want if region is hardcoded), force it
     # But wait, raw_items already filtered by region.
     # We might still want to filter by state WITHIN the region (e.g. WA vs OR).
     # For Florida, we don't need state filter if it's all FL.
-    
+
     # Actually, _select_items handles the query.
     # _filter_by_state is a post-filter on the list.
     state_filtered = _filter_by_state(prepared_items, state if region == "WA_OR" else None)
-    
+
     items = _apply_filters(state_filtered, filters=filters)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
@@ -1357,19 +1396,6 @@ def _render_dashboard(
         selected=category,
     )
     last_updated = repo.get_latest_timestamp(session)
-
-    # Get user from session for nav
-    user = None
-    session_data = request.scope.get("session", {})
-    if session_data.get("user_id"):
-        from app.auth.dependencies import _get_db_session
-        from app.auth.service import AuthService
-        try:
-            db = next(_get_db_session())
-            user = AuthService(db).get_user_by_id(session_data["user_id"])
-            db.close()
-        except Exception:
-            pass
 
     # Default title
     if not page_title:
@@ -1644,6 +1670,7 @@ def list_florida_new_clearance_today(
 
 @app.get("/export.xlsx")
 def export_excel(
+    request: Request,
     scope: Scope = Query("all", description="Dataset to export (all or new)."),
     state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
@@ -1660,6 +1687,22 @@ def export_excel(
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
     """Return an Excel workbook for the current filter selection."""
+    # Requested to be removed/disabled to prevent abuse
+    raise HTTPException(status_code=403, detail="Export to Excel is currently disabled.")
+
+    # Original implementation commented out/unreachable below...
+    # Get user for subscription check
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
@@ -1674,7 +1717,7 @@ def export_excel(
         sort_order=sort_order,
     )
     raw_items = _select_items(
-        session, scope=scope, state=None, category=normalized_category
+        session, scope=scope, state=None, category=normalized_category, user=user
     )
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, normalized_state)
@@ -1779,6 +1822,7 @@ def export_excel(
 
 @app.get("/api/clearance")
 def api_clearance(
+    request: Request,
     scope: Scope = Query("all", description="Dataset to export (all or new)."),
     state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
@@ -1795,6 +1839,19 @@ def api_clearance(
     session: Session = Depends(get_session),
 ) -> JSONResponse:
     """Return clearance items as JSON data."""
+
+    # Get user for subscription check
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
@@ -1813,6 +1870,7 @@ def api_clearance(
         scope=scope,
         state=None,
         category=normalized_category,
+        user=user,
     )
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, normalized_state)
@@ -1856,13 +1914,27 @@ def api_categories(session: Session = Depends(get_session)) -> list[str]:
 
 @app.get("/api/deals")
 def api_deals(
+    request: Request,
     category: str | None = Query(None, description="Optional category filter."),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
     """Return clearance deals as a simple list (category-filterable)."""
 
+    # Get user for subscription check
+    user = None
+    session_data = request.scope.get("session", {})
+    if session_data.get("user_id"):
+        from app.auth.dependencies import _get_db_session
+        from app.auth.service import AuthService
+        try:
+            db = next(_get_db_session())
+            user = AuthService(db).get_user_by_id(session_data["user_id"])
+            db.close()
+        except Exception:
+            pass
+
     normalized_category = (category or "").strip() or None
-    raw_items = _select_items(session, scope="all", state=None, category=normalized_category)
+    raw_items = _select_items(session, scope="all", state=None, category=normalized_category, user=user)
     prepared_items = _prepare_listings(raw_items)
     payload = [_serialize_observation(item) for item in prepared_items]
     return JSONResponse(

@@ -16,12 +16,43 @@ stripe = None
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_BASIC = os.getenv("STRIPE_PRICE_BASIC", "")  # Stripe Price ID for basic plan
+STRIPE_PRICE_BASIC = os.getenv("STRIPE_PRICE_BASIC", "")  # Stripe Price ID for basic plan (legacy)
 STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "")  # Stripe Price ID for pro plan
-STRIPE_PRICE_ENTERPRISE = os.getenv("STRIPE_PRICE_ENTERPRISE", "")
+STRIPE_PRICE_PREMIUM = os.getenv("STRIPE_PRICE_PREMIUM", "")  # Stripe Price ID for premium plan ($200/mo)
+STRIPE_PRICE_ENTERPRISE = os.getenv("STRIPE_PRICE_ENTERPRISE", "")  # Legacy alias for premium
 
-# Plan configuration - simplified to Pro only with $10/alert addon
+# Plan configuration
 PLAN_CONFIG = {
+    "pro": {
+        "name": "Pro Access",
+        "price_monthly": 50.0,
+        "stripe_price_id": STRIPE_PRICE_PRO,
+        "features": [
+            "Real-time deal access",
+            "Advanced filters & search",
+            "Unlimited saved deals",
+            "Export to Excel",
+            "Don't see your store? Email us!",
+        ],
+        "cta_text": "Get Pro",
+        "description": "Perfect for serious deal hunters",
+    },
+    "premium": {
+        "name": "Premium",
+        "price_monthly": 200.0,
+        "stripe_price_id": STRIPE_PRICE_PREMIUM or STRIPE_PRICE_ENTERPRISE,
+        "features": [
+            "Everything in Pro",
+            "Unlimited deal alerts included",
+            "Priority email support (24hr response)",
+            "Request new stores anytime",
+            "Early access to new features",
+        ],
+        "cta_text": "Go Premium",
+        "description": "For power users who want it all",
+        "support_email": "support@gloorbot.com",
+    },
+    # Legacy plans kept for backwards compatibility
     "basic": {
         "name": "Basic",
         "price_monthly": 25.0,
@@ -31,19 +62,7 @@ PLAN_CONFIG = {
             "Basic filters",
             "5 saved deals",
         ],
-    },
-    "pro": {
-        "name": "Pro Access",
-        "price_monthly": 50.0,
-        "stripe_price_id": STRIPE_PRICE_PRO,
-        "features": [
-            "Full deal archive access",
-            "All WA & OR Lowe's stores",
-            "Advanced filters & search",
-            "Unlimited saved deals",
-            "Export to Excel",
-            "Custom deal alerts ($10/each)",
-        ],
+        "legacy": True,
     },
     "enterprise": {
         "name": "Enterprise",
@@ -54,8 +73,8 @@ PLAN_CONFIG = {
             "Unlimited deal alerts included",
             "Priority support",
             "API access",
-            "Custom integrations",
         ],
+        "legacy": True,  # Use 'premium' instead
     },
 }
 
@@ -239,5 +258,13 @@ def price_id_to_plan(price_id: str) -> str:
     """Convert a Stripe price ID to a plan name."""
     for plan_name, config in PLAN_CONFIG.items():
         if config.get("stripe_price_id") == price_id:
+            # Return canonical plan name (premium instead of enterprise)
+            if plan_name == "enterprise":
+                return "premium"
             return plan_name
+    # Also check direct env var matches
+    if price_id == STRIPE_PRICE_PREMIUM or price_id == STRIPE_PRICE_ENTERPRISE:
+        return "premium"
+    if price_id == STRIPE_PRICE_PRO:
+        return "pro"
     return "free"

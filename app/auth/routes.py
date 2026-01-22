@@ -450,7 +450,17 @@ async def stripe_webhook(request: Request):
                     sub_details = stripe_service.get_subscription(subscription_id)
                     if sub_details:
                         plan_name = price_id_to_plan(sub_details.get("price_id", ""))
-                        plan = SubscriptionPlan(plan_name) if plan_name != "free" else SubscriptionPlan.BASIC
+                        # Map plan name to enum, handling premium/enterprise
+                        if plan_name == "premium":
+                            plan = SubscriptionPlan.PREMIUM
+                        elif plan_name == "enterprise":
+                            plan = SubscriptionPlan.PREMIUM  # Enterprise is legacy for Premium
+                        elif plan_name == "pro":
+                            plan = SubscriptionPlan.PRO
+                        elif plan_name != "free":
+                            plan = SubscriptionPlan.PRO  # Default paid tier
+                        else:
+                            plan = SubscriptionPlan.FREE
                         
                         auth_service.update_subscription(
                             user_id=user.id,

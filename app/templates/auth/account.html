@@ -6,7 +6,7 @@
         <h1 style="font-family: var(--font-display); font-size: 2.5rem; font-weight: 800;">My Account</h1>
         {% if request.query_params.get('checkout') == 'success' %}
         <div class="alert alert-success" style="margin-top: 1rem;">
-            <span>Subscription activated successfully! Welcome to GloorBot Pro. 🎉</span>
+            <span>Subscription activated successfully! Welcome to GloorBot. 🎉</span>
         </div>
         {% endif %}
     </div>
@@ -20,7 +20,7 @@
             <div class="card-body">
                 <div style="display: flex; gap: 1.5rem; align-items: center;">
                     <div
-                        style="width: 64px; height: 64px; border-radius: 50%; background: var(--bg-secondary); border: 2px solid var(--accent-blue); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; color: var(--accent-blue);">
+                        style="width: 64px; height: 64px; border-radius: 50%; background: var(--bg-secondary); border: 2px solid {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}#d4af37{% else %}var(--accent-blue){% endif %}; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; color: {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}#d4af37{% else %}var(--accent-blue){% endif %};">
                         {{ (user.display_name or user.email)[0]|upper }}
                     </div>
                     <div>
@@ -39,12 +39,52 @@
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <h2 style="font-size: 1.1rem; font-weight: 700;">Subscription</h2>
                 <span
-                    style="font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 100px; background: {% if subscription and subscription.plan.value == 'pro' %}var(--accent-blue-soft); color: var(--accent-blue);{% else %}var(--bg-secondary); color: var(--text-muted);{% endif %}">
+                    style="font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 100px;
+                    {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}
+                    background: linear-gradient(135deg, #d4af37, #b8860b); color: #1a1f2e;
+                    {% elif subscription and subscription.plan.value == 'pro' %}
+                    background: var(--accent-blue-soft); color: var(--accent-blue);
+                    {% else %}
+                    background: var(--bg-secondary); color: var(--text-muted);
+                    {% endif %}">
                     {{ (subscription.plan.value if subscription else 'free')|upper }}
                 </span>
             </div>
             <div class="card-body">
-                {% if subscription and subscription.plan.value == 'pro' %}
+                {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}
+                <!-- Premium/Enterprise Subscription -->
+                <div style="margin-bottom: 1.5rem;">
+                    <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Access: <strong
+                            style="color: #d4af37;">Full Database + Unlimited Alerts</strong></p>
+                    <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Status: <strong
+                            style="color: var(--success);">{{ subscription.status.value|title }}</strong></p>
+                    {% if subscription.current_period_end %}
+                    <p style="font-size: 0.9rem; color: var(--text-secondary);">Next billing: <strong
+                            style="color: var(--text-primary);">{{ subscription.current_period_end.strftime('%B %d, %Y')
+                            }}</strong></p>
+                    {% endif %}
+                </div>
+
+                <!-- Priority Support Banner for Premium -->
+                <div style="background: linear-gradient(145deg, #1a1f2e, #252b3d); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;">
+                    <p style="color: #d4af37; font-weight: 700; font-size: 0.9rem; margin-bottom: 0.5rem;">
+                        ⭐ Priority Support
+                    </p>
+                    <p style="color: #a8b5c8; font-size: 0.85rem; margin-bottom: 0.75rem;">
+                        As a Premium member, you get priority email support with guaranteed 24-hour response times.
+                    </p>
+                    <a href="mailto:support@gloorbot.com" style="color: #d4af37; font-size: 0.9rem; text-decoration: none;">
+                        ✉️ support@gloorbot.com
+                    </a>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem;">
+                    <a href="/auth/portal" class="btn btn-secondary">Manage Billing</a>
+                    <a href="/auth/pricing" class="btn btn-ghost">View Plans</a>
+                </div>
+
+                {% elif subscription and subscription.plan.value == 'pro' %}
+                <!-- Pro Subscription -->
                 <div style="margin-bottom: 1.5rem;">
                     <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Access: <strong
                             style="color: var(--text-primary);">Full Database</strong></p>
@@ -56,14 +96,29 @@
                             }}</strong></p>
                     {% endif %}
                 </div>
+
+                <!-- Store Request for Pro -->
+                <div style="background: rgba(0,0,0,0.03); border-radius: 8px; padding: 0.75rem; margin-bottom: 1.5rem;">
+                    <p style="color: var(--text-secondary); font-size: 0.85rem;">
+                        Don't see a store near you? <a href="mailto:stores@gloorbot.com" style="color: var(--accent-blue);">Email us</a> and we'll look into adding it!
+                    </p>
+                </div>
+
                 <div style="display: flex; gap: 0.75rem;">
                     <a href="/auth/portal" class="btn btn-secondary">Manage Billing</a>
                     <a href="/auth/pricing" class="btn btn-ghost">View Plans</a>
                 </div>
+
                 {% else %}
+                <!-- Free Tier -->
                 <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">You are currently
-                    using the <strong>Free</strong> plan.</p>
-                <a href="/auth/pricing" class="btn btn-primary btn-block">Upgrade to Pro ($50/mo)</a>
+                    using the <strong>Free</strong> plan. Free users can only see deals that are 5+ days old.</p>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <a href="/auth/pricing" class="btn btn-primary btn-block">Upgrade to Pro ($50/mo)</a>
+                    <p style="text-align: center; font-size: 0.8rem; color: var(--text-muted);">
+                        Or go <a href="/auth/pricing" style="color: #d4af37;">Premium ($200/mo)</a> for unlimited alerts + priority support
+                    </p>
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -74,9 +129,18 @@
                 <h2 style="font-size: 1.1rem; font-weight: 700;">Active Alerts</h2>
             </div>
             <div class="card-body">
-                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.75rem;">
                     Monitoring <strong>{{ alert_count or 0 }}</strong> custom criteria. Stay notified on the go!
                 </p>
+                {% if subscription and subscription.plan.value in ['premium', 'enterprise'] %}
+                <p style="color: #d4af37; font-size: 0.85rem; margin-bottom: 1.5rem;">
+                    ⭐ Unlimited alerts included with Premium!
+                </p>
+                {% else %}
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                    $10/month per alert (Premium members get unlimited)
+                </p>
+                {% endif %}
                 <a href="/notifications" class="btn btn-secondary btn-block">Manage Deal Alerts</a>
             </div>
         </div>

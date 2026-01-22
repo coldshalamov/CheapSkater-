@@ -13,9 +13,6 @@
       <a class="nav-link{% if active_scope == 'all' %} active{% endif %}" href="{{ base_url or '/' }}">All Clearance</a>
       <a class="nav-link{% if active_scope == 'new' %} active{% endif %}" href="{{ base_url }}/new-today">New
         Today</a>
-      <a class="nav-link"
-        href="/export.xlsx?scope={{ active_scope }}&region={{ region }}{% if query %}&{{ query }}{% endif %}">Export to
-        Excel</a>
     </div>
   </div>
 
@@ -120,6 +117,7 @@
                 <span class="store-name">{{ primary_store.store_label }}</span>
               </div>
               <div class="store-meta">
+                <span class="store-price-tag">${{ primary_store.price }}</span>
                 {% if group.stores|length > 1 %}
                 <span class="more-badge">+{{ group.stores|length - 1 }} more</span>
                 {% endif %}
@@ -143,6 +141,7 @@
                     <span class="store-name">{{ store.store_label }}</span>
                   </div>
                   <div class="store-meta">
+                    <span class="store-price-tag">${{ store.price }}</span>
                   </div>
                 </div>
               </div>
@@ -162,6 +161,40 @@
     {% endfor %}
   </div>
 </section>
+
+<!-- Store Selection Instruction Modal -->
+<div class="store-modal-overlay" id="storeModal">
+  <div class="store-modal">
+    <div class="store-modal-header">
+      <h2 class="store-modal-title">📍 Store Selected!</h2>
+      <p class="store-modal-subtitle">Follow these steps to see the price at your store</p>
+    </div>
+    <div class="store-modal-body">
+      <div class="store-copied-badge">
+        <span>✓</span>
+        <span id="modalStoreName">Store copied to clipboard!</span>
+      </div>
+
+      <div class="store-modal-instruction">
+        <p class="store-modal-instruction-text">
+          <span class="store-modal-instruction-icon">👉</span>
+          <span>Right-click and paste your store into the selector</span>
+        </p>
+      </div>
+
+      <img src="/static/img/store-selector-instruction.png" alt="Store selector instructions" class="store-modal-image"
+        id="modalInstructionImage">
+    </div>
+    <div class="store-modal-footer">
+      <button class="btn-modal-close" onclick="closeStoreModal()">Cancel</button>
+      <button class="btn-modal-next" onclick="goToProduct()">
+        Next: View Product
+        <span>→</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-container" id="toast-container"></div>
 {% endblock %}
 
@@ -225,22 +258,78 @@
     }
   }
 
-  // Copy to clipboard with toast
+  // Store modal state
+  let currentProductUrl = null;
+  let currentStoreName = null;
+
+  // Copy to clipboard and show modal
   function copyStoreFromElement(element) {
     const storeName = element.getAttribute('data-store-name');
-    copyStoreToClipboard(storeName);
+    // Find the product URL from the nearest deal card
+    const dealCard = element.closest('.deal-card');
+    let productUrl = null;
+    if (dealCard) {
+      const productLink = dealCard.querySelector('.deal-card__title a');
+      if (productLink) {
+        productUrl = productLink.href;
+      }
+    }
+    copyStoreToClipboard(storeName, productUrl);
   }
 
-  function copyStoreToClipboard(storeName) {
+  function copyStoreToClipboard(storeName, productUrl) {
     if (!storeName) return;
-    navigator.clipboard.writeText(storeName).then(() => {
-      showToast('Store Copied!', `Select <strong>${storeName}</strong> to see this price.`);
+
+    // Our UI labels often look like: "Hialeah, FL (#2254)".
+    // Lowe's store search accepts "Hialeah, FL 2254" or just "2254".
+    // Keep city/state, but remove the parentheses and '#'.
+    const clipboardText = String(storeName)
+      .replace(/[()#]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    navigator.clipboard.writeText(clipboardText).then(() => {
+      // Store the product URL for the "Next" button
+      currentProductUrl = productUrl;
+      currentStoreName = clipboardText;
+
+      // Update modal content
+      document.getElementById('modalStoreName').textContent = clipboardText + ' copied!';
+
+      // Show the modal
+      document.getElementById('storeModal').classList.add('show');
     }).catch(err => {
       console.error('Failed to copy text: ', err);
-      // Fallback
       showToast('Error', 'Could not copy store name.');
     });
   }
+
+  function closeStoreModal() {
+    document.getElementById('storeModal').classList.remove('show');
+    currentProductUrl = null;
+    currentStoreName = null;
+  }
+
+  function goToProduct() {
+    if (currentProductUrl) {
+      window.open(currentProductUrl, '_blank');
+      closeStoreModal();
+    }
+  }
+
+  // Close modal when clicking outside
+  document.getElementById('storeModal').addEventListener('click', function (e) {
+    if (e.target === this) {
+      closeStoreModal();
+    }
+  });
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      closeStoreModal();
+    }
+  });
 
   function showToast(title, message) {
     const container = document.getElementById('toast-container');

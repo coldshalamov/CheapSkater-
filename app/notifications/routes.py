@@ -128,12 +128,19 @@ async def create_alert(
     user: User = Depends(get_current_user),
     session: Session = Depends(_get_db_session),
 ):
-    """Create a new deal alert."""
-    # Validate subscription
-    if not _check_subscription(user, session):
+    """Create a new deal alert - $10/month per alert."""
+    # Check alert limits based on subscription tier
+    subscription = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+    alert_count = _count_user_alerts(user, session)
+
+    # Premium/Enterprise users get unlimited alerts
+    if subscription and subscription.plan in (SubscriptionPlan.PREMIUM, SubscriptionPlan.ENTERPRISE):
+        pass  # No limit for Premium/Enterprise
+    # All other users pay $10/month per alert with a max of 10
+    elif alert_count >= 10:
         raise HTTPException(
             status_code=402,
-            detail="Active subscription required to create alerts"
+            detail="Maximum of 10 alerts reached. Please delete an existing alert to create a new one."
         )
     
     # Validate alert type

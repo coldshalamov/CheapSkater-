@@ -14,9 +14,10 @@ from app.storage.models_sql import Base
 class SubscriptionPlan(PyEnum):
     """Available subscription tiers."""
     FREE = "free"
-    BASIC = "basic"
+    BASIC = "basic"  # Legacy - keeping for backwards compatibility
     PRO = "pro"
-    ENTERPRISE = "enterprise"
+    PREMIUM = "premium"
+    ENTERPRISE = "enterprise"  # Legacy alias for PREMIUM
 
 
 class SubscriptionStatus(PyEnum):

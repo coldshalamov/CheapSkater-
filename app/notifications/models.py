@@ -104,9 +104,12 @@ class DealAlert(Base):
         
         elif self.alert_type == NotificationType.KEYWORD:
             if self.keywords:
+                import re
                 keywords_list = [k.strip().lower() for k in self.keywords.split(",")]
                 searchable = f"{deal.get('title', '')} {deal.get('category', '')}".lower()
-                if not any(kw in searchable for kw in keywords_list):
+                # Use word boundary matching for exact keyword matching
+                # This ensures "drill" doesn't match "drilling" and vice versa
+                if not any(re.search(r'\b' + re.escape(kw) + r'\b', searchable) for kw in keywords_list):
                     return False
         
         return True

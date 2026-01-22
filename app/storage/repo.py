@@ -454,6 +454,27 @@ def get_new_clearance_today(
     return [_row_to_listing(row) for row in rows]
 
 
+def get_older_clearance_items(
+    session: Session,
+    *,
+    state: str | None = None,
+    category: str | None = None,
+    region: str | None = None,
+    min_days_old: int = 5,
+) -> list[dict[str, object]]:
+    """Return clearance items that are at least min_days_old days old (for free tier)."""
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min_days_old)
+    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
+    stmt = stmt.where(subquery.c.price_started_at <= cutoff)
+    stmt = stmt.order_by(
+        subquery.c.pct_off.desc().nullslast(),
+        subquery.c.price_started_at.desc(),
+    )
+    rows = session.execute(stmt).all()
+    return [_row_to_listing(row) for row in rows]
+
+
 def get_clearance_by_category(
     session: Session,
     category: str,
@@ -517,8 +538,12 @@ def count_quarantine(session: Session) -> int:
 def get_latest_timestamp(session: Session) -> datetime | None:
     """Return the most recent observation timestamp."""
 
-    stmt = select(func.max(Observation.ts_utc))
-    return session.scalar(stmt)
+    obs_ts = session.scalar(select(func.max(Observation.ts_utc)))
+    hist_ts = session.scalar(select(func.max(StorePriceHistory.updated_at)))
+
+    if obs_ts and hist_ts:
+        return max(obs_ts, hist_ts)
+    return obs_ts or hist_ts or None
 
 
 def list_distinct_categories(
