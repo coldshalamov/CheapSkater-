@@ -30,6 +30,7 @@ from app.normalizers import extract_category_name
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Observation
+from app.timezone_utils import format_regional_timestamp, format_regional_full_timestamp
 
 
 LOGGER = get_logger(__name__)
@@ -1143,6 +1144,18 @@ def _group_saved_deals(saved: dict[str, dict[str, Any]]) -> dict[str, list[dict[
     return dict(grouped)
 
 
+def _is_paid_user(session: Session, user: Any | None) -> bool:
+    try:
+        if not user:
+            return False
+        from app.auth.models import Subscription, SubscriptionPlan
+        sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+        return bool(sub and sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription())
+    except Exception as e:
+        LOGGER.error(f"Error checking paid user status: {e}")
+        return False
+
+
 def _select_items(
     session: Session,
     *,
@@ -1151,6 +1164,7 @@ def _select_items(
     category: str | None,
     region: str | None = None,
     user = None,
+    is_paid: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Get clearance items based on scope and user subscription tier.
@@ -1158,19 +1172,16 @@ def _select_items(
     Pro/Paid tier: sees all deals
     """
     if scope == "new":
+        # New items are always accessible, OR maybe we want to restrict "new today" to pros?
+        # For now, let's assume the restriction applies generally to the main feed.
+        # Use existing logic for new items.
         return repo.get_new_clearance_today(session, state=state, category=category, region=region)
 
-    # Check if user has paid subscription
-    has_paid_sub = False
-    if user:
-        from app.auth.models import Subscription, SubscriptionPlan
-        sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
-        if sub and sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription():
-            has_paid_sub = True
-
-    # Everyone sees all deals for now (free tier restriction removed for testing)
-    # TODO: Re-enable subscription gating after verifying data pipeline
-    return repo.get_clearance_items(session, state=state, category=category, region=region)
+    if is_paid:
+        return repo.get_clearance_items(session, state=state, category=category, region=region)
+    
+    # Free tier sees older deals
+    return repo.get_older_clearance_items(session, state=state, category=category, region=region, min_days_old=5)
 
 
 def _collect_categories(
@@ -1364,16 +1375,23 @@ def _render_dashboard(
     user = None
     session_data = request.scope.get("session", {})
     if session_data.get("user_id"):
-        from app.auth.dependencies import _get_db_session
-        from app.auth.service import AuthService
         try:
-            db = next(_get_db_session())
-            user = AuthService(db).get_user_by_id(session_data["user_id"])
-            db.close()
+            from app.auth.service import AuthService
+            user = AuthService(session).get_user_by_id(session_data["user_id"])
         except Exception:
             pass
 
-    raw_items = _select_items(session, scope=scope, state=state if region != "FL" else None, category=category, region=region, user=user)
+    is_pro = _is_paid_user(session, user)
+
+    raw_items = _select_items(
+        session,
+        scope=scope,
+        state=state if region != "FL" else None,
+        category=category,
+        region=region,
+        user=user,
+        is_paid=is_pro,
+    )
     prepared_items = _prepare_listings(raw_items)
     # If explicit state was passed (which we might not want if region is hardcoded), force it
     # But wait, raw_items already filtered by region.
@@ -1436,11 +1454,14 @@ def _render_dashboard(
             "store_tooltip_builder": _format_store_tooltip,
             "format_timestamp": _format_timestamp,
             "format_currency": _format_currency,
+            "format_regional_timestamp": format_regional_timestamp,
+            "format_regional_full_timestamp": format_regional_full_timestamp,
             "filters": filters,
             "time_filter_options": TIME_FILTER_OPTIONS,
             "discount_filter_options": DISCOUNT_FILTER_OPTIONS,
             "stock_filter_options": STOCK_FILTER_OPTIONS,
             "sort_filter_options": SORT_OPTIONS,
+            "is_pro": is_pro,
         },
     )
 

@@ -3,11 +3,20 @@
 {% block content %}
 <section class="dashboard">
   <div class="header">
-    <h1>{{ page_title }}</h1>
+    <h1>
+      {{ page_title }}
+      {% if is_pro %}
+      <span
+        style="background: var(--success-soft); color: #065f46; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; border: 1px solid #a7f3d0; margin-left: 0.5rem; vertical-align: middle; display: inline-block;">
+        ⚡ Pro Account: Live Deals
+      </span>
+      {% endif %}
+    </h1>
     <div class="subtitle">
       Tracking clearance items at <strong>{{ items|length }}</strong> unique listings across
       {% if region == 'WA_OR' %}Washington & Oregon{% elif region == 'FL' %}Florida{% else %}all regions{% endif %}.
-      {% if last_updated %}Last updated {{ last_updated.strftime('%I:%M %p') }} UTC.{% else %}No data yet.{% endif %}
+      {% if last_updated %}Last updated {{ format_regional_timestamp(last_updated, region) }}.{% else %}No data yet.{%
+      endif %}
     </div>
     <div class="nav-links">
       <a class="nav-link{% if active_scope == 'all' %} active{% endif %}" href="{{ base_url or '/' }}">All Clearance</a>
@@ -64,6 +73,14 @@
     </div>
   </form>
 
+  {% if not is_pro %}
+  <div
+    style="background: #fffbeb; color: #92400e; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 2rem; border: 1px solid #fcd34d; font-size: 0.95rem; text-align: center;">
+    <strong>Limited Access:</strong> You are viewing older deals (5+ days). For live up-to-the-minute deals <a
+      href="/auth/pricing" style="color: #b45309; text-decoration: underline; font-weight: 700;">Upgrade to Pro</a>.
+  </div>
+  {% endif %}
+
   <div
     style="background: var(--success-soft); color: #065f46; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 2rem; border: 1px solid #a7f3d0; font-size: 0.9rem;">
     <strong>Pro Tip:</strong> Click <em>Save deal</em> to build a pickup list, then view them in <a href="/cheapskater"
@@ -71,7 +88,7 @@
   </div>
 
   <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
-    Last updated: {{ last_updated.strftime('%b %d, %Y %I:%M %p %Z') if last_updated else 'No observations yet' }}
+    Last updated: {{ format_regional_full_timestamp(last_updated, region) if last_updated else 'No observations yet' }}
   </p>
 
   <div id="cards-grid" class="deals-grid">
@@ -103,7 +120,8 @@
         </h3>
         <div class="deal-card__pricing">
           {% if group.price_spread and group.price_spread > 0.01 %}
-          <span class="deal-card__price">${{ "%.2f"|format(group.min_price) }} - ${{ "%.2f"|format(group.max_price) }}</span>
+          <span class="deal-card__price">${{ "%.2f"|format(group.min_price) }} - ${{ "%.2f"|format(group.max_price)
+            }}</span>
           {% else %}
           <span class="deal-card__price">${{ "%.2f"|format(group.min_price) }}</span>
           {% endif %}

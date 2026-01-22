@@ -232,7 +232,7 @@
         </div>
         <div class="summary-meta">
             <span>{{ deal_count }} deals analyzed</span>
-            <span>Updated {{ last_updated.strftime('%I:%M %p') }} UTC</span>
+            <span>Updated {{ format_regional_timestamp(last_updated, region) }}</span>
         </div>
     </div>
 

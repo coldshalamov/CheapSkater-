@@ -1,0 +1,42 @@
+ignore_all_files_in_gitignore: true
+
+# list of additional paths to ignore
+ignored_paths:
+  - ".venv/**"
+  - ".pytest_cache/**"
+  - ".pytest_tmp/**"
+  - "__pycache__/**"
+  - "*.pyc"
+  - "*.sqlite"
+  - "*.sqlite-shm"
+  - "*.sqlite-wal"
+  - "logs/**"
+  - "outputs/**"
+  - "scrapy-impersonate-master/**"
+  - "tmp*.py"
+  - "tmp*.html"
+
+# whether the project is in read-only mode
+read_only: false
+
+excluded_tools: []
+
+# initial prompt for the project
+initial_prompt: |
+  This is CheapSkater, a FastAPI web dashboard for browsing Lowe's clearance deals.
+
+  Key architecture points:
+  - This repo contains the dashboard/API only - the scraper (Gloorbot) is in a separate repository
+  - Database: SQLite with SQLAlchemy ORM (app/storage/)
+  - Authentication: Custom session middleware with Stripe integration for subscriptions
+  - Notifications: SendGrid email alerts for deal matching
+  - Multi-region support: WA/OR (ZIP 980-994, 970-979) and Florida (ZIP 2200-2299)
+
+  Main entry point: app/dashboard.py
+  See CLAUDE.md for comprehensive architecture documentation.
+
+project_name: "CheapSkater"
+languages:
+  - python
+included_optional_tools: []
+encoding: utf-8

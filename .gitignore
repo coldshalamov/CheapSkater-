@@ -30,6 +30,11 @@ __pycache__/
 /.vscode/
 /.idea/
 
+# Serena MCP internal files (keep project.yml)
+/.serena/*
+!/.serena/.gitignore
+!/.serena/project.yml
+
 # Stray logs outside /logs
 *.log
 .kilocode/mcp.json

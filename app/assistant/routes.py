@@ -14,6 +14,7 @@ from pathlib import Path
 from app.logging_config import get_logger
 from app.storage import repo
 from app.assistant.zai_service import generate_deal_summary, is_zai_configured
+from app.timezone_utils import format_regional_timestamp
 
 LOGGER = get_logger(__name__)
 
@@ -116,6 +117,7 @@ async def assistant_page(
             "last_updated": last_updated,
             "ai_configured": is_zai_configured(),
             "active_scope": "assistant",
+            "format_regional_timestamp": format_regional_timestamp,
         },
     )
 

@@ -1,0 +1,4 @@
+# Serena internal files - don't commit these
+*
+!.gitignore
+!project.yml
