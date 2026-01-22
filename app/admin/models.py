@@ -84,8 +84,8 @@ class UserActivity(Base):
     # Timestamp
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
-    # Optional metadata
-    metadata: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON blob for additional context
+    # Optional additional data
+    extra_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON blob for additional context
 
     __table_args__ = (
         Index("ix_user_activity_user_occurred", "user_id", "occurred_at"),

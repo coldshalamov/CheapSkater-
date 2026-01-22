@@ -189,7 +189,7 @@ class AdminService:
         activity_type: str,
         ip_address: str | None = None,
         user_agent: str | None = None,
-        metadata: str | None = None,
+        extra_data: str | None = None,
     ) -> UserActivity:
         """Log a user activity event."""
         activity = UserActivity(
@@ -197,7 +197,7 @@ class AdminService:
             activity_type=activity_type,
             ip_address=ip_address,
             user_agent=user_agent,
-            metadata=metadata,
+            extra_data=extra_data,
         )
         self.session.add(activity)
         self.session.commit()
