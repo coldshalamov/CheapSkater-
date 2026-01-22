@@ -854,16 +854,15 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
             return text or None
         return value
 
-    # Recalculate pct_off if it's missing/zero but we have valid prices
-    # This fixes data where pct_off was incorrectly stored as 0
-    stored_pct_off = listing.get("pct_off")
+    # Always recalculate pct_off from prices for accuracy
+    # This fixes data where pct_off was incorrectly stored as 0 or wrong values
     price = listing.get("price")
     price_was = listing.get("price_was")
 
-    if (stored_pct_off is None or stored_pct_off == 0) and price and price_was:
+    if price and price_was and price_was > price:
         effective_pct_off = _calculate_discount_pct(price, price_was)
     else:
-        effective_pct_off = stored_pct_off
+        effective_pct_off = listing.get("pct_off") or 0
 
     payload = {
         "history_id": listing.get("history_id"),
@@ -975,18 +974,16 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
         )
         prices = [row.get("price") for row in stores if row.get("price") is not None]
-        # Recalculate discounts if stored pct_off is 0 or missing but prices are valid
+        # Always recalculate discounts from price/price_was for accuracy
+        # This fixes data where pct_off was incorrectly stored as 0 or wrong values
         discounts = []
         for row in stores:
-            stored_pct = row.get("pct_off")
             price = row.get("price")
             price_was = row.get("price_was")
-            if (stored_pct is None or stored_pct == 0) and price and price_was:
+            if price and price_was and price_was > price:
                 calc_pct = _calculate_discount_pct(price, price_was)
                 if calc_pct > 0:
                     discounts.append(calc_pct)
-            elif stored_pct is not None and stored_pct > 0:
-                discounts.append(stored_pct)
         savings = []
         for row in stores:
             price = row.get("price")
