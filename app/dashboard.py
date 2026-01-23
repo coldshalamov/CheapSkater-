@@ -37,9 +37,11 @@ LOGGER = get_logger(__name__)
 BASE_PATH = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_PATH / "templates"
 STATIC_DIR = BASE_PATH / "static"
-FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()     
+FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()
 DATABASE_FILE = resolve_database_file(fallback=FALLBACK_DATABASE_FILE)
-METRICS_SUMMARY_FILE = Path(os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json"))
+METRICS_SUMMARY_FILE = Path(
+    os.getenv("CHEAPSKATER_METRICS_SUMMARY", "logs/metrics_summary.json")
+)
 ZIP_CURSOR_FILE = Path(os.getenv("CHEAPSKATER_ZIP_CURSOR", "logs/zip_cursor.json"))
 HEALTH_MAX_STALE_MINUTES = float(os.getenv("DASHBOARD_HEALTH_MAX_STALE_MINUTES", "120"))
 
@@ -53,30 +55,36 @@ app = FastAPI(title="CheapSkater Clearance Dashboard")
 
 # Register ingest API router
 from app.ingest import router as ingest_router
+
 app.include_router(ingest_router)
 
 # Register auth router for login, registration, and subscriptions
 from app.auth.routes import router as auth_router
+
 app.include_router(auth_router)
 
 # Register notification routes for deal alerts
 from app.notifications.routes import router as notifications_router
+
 app.include_router(notifications_router)
 
 # Register AI assistant routes (unlisted subsite)
 from app.assistant.routes import router as assistant_router
+
 app.include_router(assistant_router)
 
 # Register admin routes for system management
 from app.admin.routes import router as admin_router
+
 app.include_router(admin_router)
+
 
 def _ensure_schema_up_to_date():
     """Self-healing: Ensures database has the 'region' column required for Florida expansion."""
     db_path = DATABASE_FILE
     if not db_path.exists():
         return
-    
+
     LOGGER.info("Verifying database schema: %s", db_path)
     # Give it a retry if locked
     for i in range(3):
@@ -85,21 +93,25 @@ def _ensure_schema_up_to_date():
             cursor = conn.cursor()
             cursor.execute("PRAGMA table_info(stores)")
             columns = [row[1] for row in cursor.fetchall()]
-            
+
             if "region" not in columns:
-                LOGGER.warning("Schema out of date: 'region' column missing. Running auto-migration...")
+                LOGGER.warning(
+                    "Schema out of date: 'region' column missing. Running auto-migration..."
+                )
                 cursor.execute("ALTER TABLE stores ADD COLUMN region TEXT")
                 try:
                     cursor.execute("ALTER TABLE observations ADD COLUMN region TEXT")
                 except sqlite3.OperationalError:
                     pass
                 try:
-                    cursor.execute("ALTER TABLE store_price_history ADD COLUMN region TEXT")
+                    cursor.execute(
+                        "ALTER TABLE store_price_history ADD COLUMN region TEXT"
+                    )
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
                 LOGGER.info("Auto-migration successful.")
-            
+
             # Always run region backfill/repair on startup
             # This fixes cases where stores were added (e.g. via ingest) without a region
             cursor.execute("""
@@ -129,26 +141,38 @@ def _ensure_schema_up_to_date():
             LOGGER.exception("Auto-migration failed: %s", e)
             break
 
+
 # Run self-healing check
 # Run self-healing check
 _ensure_schema_up_to_date()
 
 
 def _ensure_admin_permissions():
-    """Self-healing: Ensures the primary admin account has correct permissions and subscription."""
+    """Self-healing: Ensures primary admin account has correct permissions and subscription."""
     target_email = "93robingattis@gmail.com"
-    
+
     try:
-        from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
-        
+        from app.auth.models import (
+            User,
+            Subscription,
+            SubscriptionPlan,
+            SubscriptionStatus,
+        )
+        from app.admin.models import Base as AdminBase
+
+        LOGGER.info("Creating admin tables...")
+        AdminBase.metadata.create_all(engine, checkfirst=True)
+        LOGGER.info("Admin tables verified")
+
         # Use a fresh session directly
         with session_factory() as session:
             user = session.query(User).filter(User.email == target_email).first()
             if not user:
+                create_admin_user(session)
                 return
 
             changes_made = False
-            
+
             # 1. Ensure Admin Status
             if not user.is_admin:
                 user.is_admin = True
@@ -156,7 +180,11 @@ def _ensure_admin_permissions():
                 LOGGER.info(f"Upgraded {target_email} to Admin.")
 
             # 2. Ensure Subscription Status
-            sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+            sub = (
+                session.query(Subscription)
+                .filter(Subscription.user_id == user.id)
+                .first()
+            )
             if not sub:
                 sub = Subscription(
                     user_id=user.id,
@@ -168,7 +196,10 @@ def _ensure_admin_permissions():
                 changes_made = True
                 LOGGER.info(f"Created Premium subscription for {target_email}.")
             else:
-                if sub.plan != SubscriptionPlan.PREMIUM or sub.status != SubscriptionStatus.ACTIVE:
+                if (
+                    sub.plan != SubscriptionPlan.PREMIUM
+                    or sub.status != SubscriptionStatus.ACTIVE
+                ):
                     sub.plan = SubscriptionPlan.PREMIUM
                     sub.status = SubscriptionStatus.ACTIVE
                     changes_made = True
@@ -177,9 +208,33 @@ def _ensure_admin_permissions():
             if changes_made:
                 session.commit()
                 LOGGER.info(f"Admin permissions enforced for {target_email}")
-                
+
     except Exception as e:
         LOGGER.exception(f"Failed to enforce admin permissions: {e}")
+
+
+def create_admin_user(session):
+    from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
+
+    LOGGER.info("Creating admin user: 93robingattis@gmail.com")
+    admin_user = User(
+        email="93robingattis@gmail.com",
+        hashed_password="$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYKwq5qDx1",
+        is_admin=True,
+        is_active=True,
+    )
+    session.add(admin_user)
+    session.flush()
+
+    sub = Subscription(
+        user_id=admin_user.id,
+        plan=SubscriptionPlan.PREMIUM,
+        status=SubscriptionStatus.ACTIVE,
+    )
+    session.add(sub)
+    session.commit()
+    LOGGER.info("Admin user created successfully")
+
 
 _ensure_admin_permissions()
 
@@ -197,9 +252,11 @@ class IngestDeal(BaseModel):
     pct_off: float
     found_at: str
 
+
 class IngestRequest(BaseModel):
     source: str
     deals: list[IngestDeal]
+
 
 def _extract_sku(url: str) -> str | None:
     if not url:
@@ -210,6 +267,7 @@ def _extract_sku(url: str) -> str | None:
     if match:
         return match.group(1)
     return None
+
 
 def _extract_category_name(url: str | None) -> str:
     return extract_category_name(url)
@@ -231,18 +289,23 @@ def _sanitize_image_url(value: str | None) -> str | None:
         return None
     return cleaned
 
+
 SESSION_SECRET = os.getenv("CHEAPSKATER_SESSION_SECRET", "cheapskater-session-secret")
 SESSION_MAX_AGE = int(os.getenv("CHEAPSKATER_SESSION_MAX_AGE", str(60 * 60 * 24 * 30)))
-app.add_middleware(SimpleSessionMiddleware, secret_key=SESSION_SECRET, max_age=SESSION_MAX_AGE)
+app.add_middleware(
+    SimpleSessionMiddleware, secret_key=SESSION_SECRET, max_age=SESSION_MAX_AGE
+)
 
 # Add user activity tracking middleware
 from app.admin.middleware import UserActivityMiddleware
+
 app.add_middleware(UserActivityMiddleware, database_file=str(DATABASE_FILE))
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 _STATS_CACHE: dict[str, Any] | None = None
 _STATS_CACHE_TS: float | None = None
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     try:
@@ -264,9 +327,14 @@ async def not_found_handler(request: Request, exc: HTTPException) -> PlainTextRe
         status_code=404,
     )
 
+
 Scope = Literal["all", "new"]
 STATE_OPTIONS = ["ALL", "WA", "OR", "FL"]
-REGION_OPTIONS = [("ALL", "All Regions"), ("WA_OR", "Washington & Oregon"), ("FL", "Florida")]
+REGION_OPTIONS = [
+    ("ALL", "All Regions"),
+    ("WA_OR", "Washington & Oregon"),
+    ("FL", "Florida"),
+]
 SORT_OPTIONS = [
     ("newest", "Newest first"),
     ("alpha_asc", "Title A → Z"),
@@ -277,14 +345,18 @@ SORT_OPTIONS = [
 DEFAULT_CATEGORY_OPTIONS: list[str] = []
 INITIAL_GROUP_BATCH = 30
 _STORE_HOURS_SUFFIX = re.compile(r"\s+\d{1,2}\s*(?:AM|PM)$", re.I)
-_STOCK_COUNT_PATTERN = re.compile(r"(?:only|about)?\s*(\d+)\s*(?:left|available|in\s*stock|qty|quantity)", re.I)
+_STOCK_COUNT_PATTERN = re.compile(
+    r"(?:only|about)?\s*(\d+)\s*(?:left|available|in\s*stock|qty|quantity)", re.I
+)
 _SAVED_DEALS_SESSION_KEY = "saved_deals"
 _STORE_STATUS_TOKEN_PATTERN = re.compile(r"\s+(?:closed|open)\b", re.I)
 _STORE_HOURS_RANGE_PATTERN = re.compile(
     r"\s+\d{1,2}\s*(?:AM|PM)\s*(?:[-–—]\s*\d{1,2}\s*(?:AM|PM))?",
     re.I,
 )
-_STORE_HOURS_VERB_PATTERN = re.compile(r"\s+(?:opens|closes)\s+\d{1,2}\s*(?:AM|PM)", re.I)
+_STORE_HOURS_VERB_PATTERN = re.compile(
+    r"\s+(?:opens|closes)\s+\d{1,2}\s*(?:AM|PM)", re.I
+)
 
 
 class SaveDealPayload(BaseModel):
@@ -431,7 +503,9 @@ def _estimate_stock_units(availability: str | None) -> int | None:
     return None
 
 
-def _format_stock_status(stock_estimate: int | None, availability: str | None) -> str | None:
+def _format_stock_status(
+    stock_estimate: int | None, availability: str | None
+) -> str | None:
     if stock_estimate is None:
         return None
     if stock_estimate == 0:
@@ -441,7 +515,9 @@ def _format_stock_status(stock_estimate: int | None, availability: str | None) -
 
 def _prepare_listing(listing: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(listing)
-    store_number = _normalize_store_number(enriched.get("store_id") or enriched.get("store_number"))
+    store_number = _normalize_store_number(
+        enriched.get("store_id") or enriched.get("store_number")
+    )
     canonical_store = _canonical_store_details(store_number)
     if canonical_store:
         enriched.setdefault("store_name", canonical_store.get("name"))
@@ -459,7 +535,9 @@ def _prepare_listing(listing: dict[str, Any]) -> dict[str, Any]:
     enriched["days_since_added"] = _relative_days(added_ts)
     stock_estimate = _estimate_stock_units(enriched.get("availability"))
     enriched["stock_estimate"] = stock_estimate
-    enriched["stock_label"] = _format_stock_status(stock_estimate, enriched.get("availability"))
+    enriched["stock_label"] = _format_stock_status(
+        stock_estimate, enriched.get("availability")
+    )
     return enriched
 
 
@@ -509,7 +587,11 @@ def _normalize_filters(
     stock_max: str | int | None,
     sort_order: str | None,
 ) -> dict[str, Any]:
-    normalized_time = time_window if any(opt[0] == time_window for opt in TIME_FILTER_OPTIONS) else "all"
+    normalized_time = (
+        time_window
+        if any(opt[0] == time_window for opt in TIME_FILTER_OPTIONS)
+        else "all"
+    )
     delta = _time_delta_for(normalized_time)
     cutoff = None
     if delta:
@@ -550,12 +632,18 @@ def _normalize_filters(
         parsed_max = _as_int(stock_max)
         stock_floor = _sanitize_stock(parsed_min)
         stock_ceiling = _sanitize_stock(parsed_max)
-        if stock_floor is not None and stock_ceiling is not None and stock_ceiling < stock_floor:
+        if (
+            stock_floor is not None
+            and stock_ceiling is not None
+            and stock_ceiling < stock_floor
+        ):
             stock_floor, stock_ceiling = stock_ceiling, stock_floor
     else:
         stock_choice = "all"
 
-    sort_choice = sort_order if sort_order in {value for value, _ in SORT_OPTIONS} else "newest"
+    sort_choice = (
+        sort_order if sort_order in {value for value, _ in SORT_OPTIONS} else "newest"
+    )
 
     return {
         "time_window": normalized_time,
@@ -607,7 +695,9 @@ STOCK_FILTER_OPTIONS = [
 ]
 
 
-def _sort_groups(groups: list[dict[str, Any]], sort_choice: str | None) -> list[dict[str, Any]]:
+def _sort_groups(
+    groups: list[dict[str, Any]], sort_choice: str | None
+) -> list[dict[str, Any]]:
     """Return *groups* ordered according to the requested sort."""
 
     choice = sort_choice or "newest"
@@ -806,15 +896,13 @@ def _listing_state(listing: dict[str, Any]) -> str | None:
     return None
 
 
-def _filter_by_state(listings: Iterable[dict[str, Any]], state: str | None) -> list[dict[str, Any]]:
+def _filter_by_state(
+    listings: Iterable[dict[str, Any]], state: str | None
+) -> list[dict[str, Any]]:
     if not state:
         return list(listings)
     target = state.upper()
-    return [
-        listing
-        for listing in listings
-        if _listing_state(listing) == target
-    ]
+    return [listing for listing in listings if _listing_state(listing) == target]
 
 
 def _state_from_zip(zip_code: str | None) -> str | None:
@@ -899,7 +987,9 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         or _store_specific_url(listing.get("product_url"), listing.get("store_id")),
         "stock_estimate": listing.get("stock_estimate"),
         "stock_label": listing.get("stock_label"),
-        "days_since_added": _relative_days(listing.get("first_seen") or listing.get("price_started_at")),
+        "days_since_added": _relative_days(
+            listing.get("first_seen") or listing.get("price_started_at")
+        ),
     }
     canonical = _canonical_store_details(listing.get("store_id"))
     if canonical:
@@ -931,8 +1021,10 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "category": listing.get("category"),
                 "image_url": image_url,
                 "stores": [],
-                "added_at": listing.get("first_seen") or listing.get("price_started_at"),
-                "last_seen": listing.get("updated_at") or listing.get("price_started_at"),
+                "added_at": listing.get("first_seen")
+                or listing.get("price_started_at"),
+                "last_seen": listing.get("updated_at")
+                or listing.get("price_started_at"),
                 "days_since_added": listing.get("days_since_added"),
             },
         )
@@ -993,7 +1085,9 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             best_price_was = best_store.get("price_was")
             if best_price and best_price_was and best_price_was > best_price:
                 best_discount = _calculate_discount_pct(best_price, best_price_was)
-                if best_discount > 0 and (not discounts or best_discount > max(discounts)):
+                if best_discount > 0 and (
+                    not discounts or best_discount > max(discounts)
+                ):
                     discounts.append(best_discount)
 
         savings = []
@@ -1004,14 +1098,18 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             savings.append(max(price_was - price, 0))
         stock_values = [
-            row.get("stock_estimate") for row in stores if row.get("stock_estimate") is not None
+            row.get("stock_estimate")
+            for row in stores
+            if row.get("stock_estimate") is not None
         ]
         bucket["min_price"] = min(prices) if prices else None
         bucket["max_price"] = max(prices) if prices else None
         bucket["min_pct_off"] = min(discounts) if discounts else None
         bucket["max_pct_off"] = max(discounts) if discounts else None
         bucket["price_spread"] = _spread(bucket["min_price"], bucket["max_price"])
-        bucket["discount_spread"] = _spread(bucket["min_pct_off"], bucket["max_pct_off"])
+        bucket["discount_spread"] = _spread(
+            bucket["min_pct_off"], bucket["max_pct_off"]
+        )
         bucket["min_stock_estimate"] = min(stock_values) if stock_values else None
         bucket["max_stock_estimate"] = max(stock_values) if stock_values else None
         bucket["min_savings"] = min(savings) if savings else None
@@ -1019,9 +1117,9 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bucket["locations"] = len(stores)
         if stores:
             best_store = stores[0]
-            bucket["best_product_url"] = best_store.get("store_product_url") or best_store.get(
-                "product_url"
-            )
+            bucket["best_product_url"] = best_store.get(
+                "store_product_url"
+            ) or best_store.get("product_url")
         else:
             bucket["best_product_url"] = None
         bucket["days_since_added"] = bucket.get("days_since_added") or _relative_days(
@@ -1048,9 +1146,7 @@ def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
 
     # Still collect all price_was values for range calculation
     price_was_values = [
-        store.get("price_was")
-        for store in stores
-        if store.get("price_was") is not None
+        store.get("price_was") for store in stores if store.get("price_was") is not None
     ]
 
     payload = {
@@ -1072,9 +1168,14 @@ def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
         "min_savings": group.get("min_savings"),
         "max_savings": group.get("max_savings"),
         "locations": group.get("locations"),
-        "added_at": group.get("added_at").isoformat() if isinstance(group.get("added_at"), datetime) else group.get("added_at"),
-        "last_seen": group.get("last_seen").isoformat() if isinstance(group.get("last_seen"), datetime) else group.get("last_seen"),
-        "days_since_added": group.get("days_since_added") or _relative_days(group.get("added_at")),
+        "added_at": group.get("added_at").isoformat()
+        if isinstance(group.get("added_at"), datetime)
+        else group.get("added_at"),
+        "last_seen": group.get("last_seen").isoformat()
+        if isinstance(group.get("last_seen"), datetime)
+        else group.get("last_seen"),
+        "days_since_added": group.get("days_since_added")
+        or _relative_days(group.get("added_at")),
         "best_product_url": group.get("best_product_url"),
         "stores": [_serialize_listing(store) for store in stores],
     }
@@ -1145,9 +1246,13 @@ def _build_cheapskater_deal(listing: dict[str, Any]) -> dict[str, Any]:
         "price": price_value,
         "price_display": _format_currency(price_value),
         "price_was": price_was,
-        "price_was_display": _format_currency(price_was) if price_was is not None else None,
+        "price_was_display": _format_currency(price_was)
+        if price_was is not None
+        else None,
         "pct_off": pct_off_value,
-        "pct_off_label": f"{pct_off_value:.0f}% off" if pct_off_value is not None else None,
+        "pct_off_label": f"{pct_off_value:.0f}% off"
+        if pct_off_value is not None
+        else None,
         "availability": listing.get("availability"),
         "stock": stock_value if stock_value is not None else 0,
         "stock_estimate": stock_estimate,
@@ -1241,7 +1346,9 @@ def _serialize_saved_deal(entry: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _group_saved_deals(saved: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _group_saved_deals(
+    saved: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entry in saved.values():
         store_number = entry.get("store_number") or "unknown"
@@ -1249,7 +1356,9 @@ def _group_saved_deals(saved: dict[str, dict[str, Any]]) -> dict[str, list[dict[
     return dict(grouped)
 
 
-def _get_user_subscription_info(session: Session, user: Any | None) -> tuple[bool, str | None]:
+def _get_user_subscription_info(
+    session: Session, user: Any | None
+) -> tuple[bool, str | None]:
     """
     Get user subscription information.
 
@@ -1262,14 +1371,21 @@ def _get_user_subscription_info(session: Session, user: Any | None) -> tuple[boo
         if not user:
             return False, None
         from app.auth.models import Subscription, SubscriptionPlan
-        sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+
+        sub = (
+            session.query(Subscription).filter(Subscription.user_id == user.id).first()
+        )
         if not sub:
             LOGGER.debug(f"User {user.email} has no subscription record")
-            return False, 'free'
+            return False, "free"
 
-        is_paid = bool(sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription())
+        is_paid = bool(
+            sub.plan != SubscriptionPlan.FREE and sub.is_active_subscription()
+        )
         plan_name = sub.plan.value
-        LOGGER.debug(f"User {user.email}: plan={plan_name}, status={sub.status.value}, is_active={sub.is_active_subscription()}, is_paid={is_paid}")
+        LOGGER.debug(
+            f"User {user.email}: plan={plan_name}, status={sub.status.value}, is_active={sub.is_active_subscription()}, is_paid={is_paid}"
+        )
         return is_paid, plan_name
     except Exception as e:
         LOGGER.error(f"Error checking paid user status: {e}", exc_info=True)
@@ -1289,7 +1405,7 @@ def _select_items(
     state: str | None,
     category: str | None,
     region: str | None = None,
-    user = None,
+    user=None,
     is_paid: bool = False,
 ) -> list[dict[str, Any]]:
     """
@@ -1301,13 +1417,19 @@ def _select_items(
         # New items are always accessible, OR maybe we want to restrict "new today" to pros?
         # For now, let's assume the restriction applies generally to the main feed.
         # Use existing logic for new items.
-        return repo.get_new_clearance_today(session, state=state, category=category, region=region)
+        return repo.get_new_clearance_today(
+            session, state=state, category=category, region=region
+        )
 
     if is_paid:
-        return repo.get_clearance_items(session, state=state, category=category, region=region)
-    
+        return repo.get_clearance_items(
+            session, state=state, category=category, region=region
+        )
+
     # Free tier sees older deals
-    return repo.get_older_clearance_items(session, state=state, category=category, region=region, min_days_old=5)
+    return repo.get_older_clearance_items(
+        session, state=state, category=category, region=region, min_days_old=5
+    )
 
 
 def _collect_categories(
@@ -1318,13 +1440,17 @@ def _collect_categories(
     min_pct_off: float | None = None,
     selected: str | None = None,
 ) -> list[str]:
-    discovered = repo.list_distinct_categories(session, state=state, region=region, min_pct_off=min_pct_off)
+    discovered = repo.list_distinct_categories(
+        session, state=state, region=region, min_pct_off=min_pct_off
+    )
     merged = list(discovered)
     if selected:
         cleaned = selected.strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
-    merged = sorted({*DEFAULT_CATEGORY_OPTIONS, *merged}, key=lambda value: value.casefold())
+    merged = sorted(
+        {*DEFAULT_CATEGORY_OPTIONS, *merged}, key=lambda value: value.casefold()
+    )
     return merged
 
 
@@ -1351,13 +1477,14 @@ def cheapskater_view(request: Request):
     if session_data.get("user_id"):
         from app.auth.dependencies import _get_db_session
         from app.auth.service import AuthService
+
         try:
             db = next(_get_db_session())
             user = AuthService(db).get_user_by_id(session_data["user_id"])
             db.close()
         except Exception:
             pass
-    
+
     return templates.TemplateResponse(
         "cheapskater.html",
         {
@@ -1386,7 +1513,9 @@ def save_deal(
     store_number = (payload.store_number or "").strip()
     sku = (payload.sku or "").strip()
     if not store_number or not sku:
-        raise HTTPException(status_code=400, detail="store_number and sku are required.")
+        raise HTTPException(
+            status_code=400, detail="store_number and sku are required."
+        )
     listing = _lookup_listing_for_save(session, store_number, sku)
     if listing is None:
         raise HTTPException(status_code=404, detail="Deal not found.")
@@ -1503,6 +1632,7 @@ def _render_dashboard(
     if session_data.get("user_id"):
         try:
             from app.auth.service import AuthService
+
             user = AuthService(session).get_user_by_id(session_data["user_id"])
             if user:
                 LOGGER.debug(f"Loaded user {user.email} (ID: {user.id}) from session")
@@ -1531,7 +1661,9 @@ def _render_dashboard(
 
     # Actually, _select_items handles the query.
     # _filter_by_state is a post-filter on the list.
-    state_filtered = _filter_by_state(prepared_items, state if region == "WA_OR" else None)
+    state_filtered = _filter_by_state(
+        prepared_items, state if region == "WA_OR" else None
+    )
 
     items = _apply_filters(state_filtered, filters=filters)
     # Count unique stores across all listings
@@ -1614,7 +1746,9 @@ def healthcheck() -> dict[str, Any]:
     try:
         stamp = datetime.fromisoformat(ts_text)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"cursor parse error: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"cursor parse error: {exc}"
+        ) from exc
     age_minutes = (datetime.now(timezone.utc) - stamp).total_seconds() / 60.0
     if HEALTH_MAX_STALE_MINUTES > 0 and age_minutes > HEALTH_MAX_STALE_MINUTES:
         raise HTTPException(
@@ -1842,9 +1976,15 @@ def export_excel(
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
     ),
-    discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
-    discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
-    stock_filter: str | None = Query(None, description="Stock preset (quantity or custom)."),
+    discount_min: str | None = Query(
+        None, description="Custom minimum discount percentage."
+    ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
+    stock_filter: str | None = Query(
+        None, description="Stock preset (quantity or custom)."
+    ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
     sort_order: str = Query("newest", description="Sort order key."),
@@ -1852,7 +1992,9 @@ def export_excel(
 ) -> StreamingResponse:
     """Return an Excel workbook for the current filter selection."""
     # Requested to be removed/disabled to prevent abuse
-    raise HTTPException(status_code=403, detail="Export to Excel is currently disabled.")
+    raise HTTPException(
+        status_code=403, detail="Export to Excel is currently disabled."
+    )
 
     # Original implementation commented out/unreachable below...
     # Get user for subscription check
@@ -1861,6 +2003,7 @@ def export_excel(
     if session_data.get("user_id"):
         from app.auth.dependencies import _get_db_session
         from app.auth.service import AuthService
+
         try:
             db = next(_get_db_session())
             user = AuthService(db).get_user_by_id(session_data["user_id"])
@@ -1911,7 +2054,9 @@ def export_excel(
     ]
     sheet.append(headers)
     header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="004990", end_color="004990", fill_type="solid")
+    header_fill = PatternFill(
+        start_color="004990", end_color="004990", fill_type="solid"
+    )
     for cell in sheet[1]:
         cell.font = header_font
         cell.fill = header_fill
@@ -1994,9 +2139,15 @@ def api_clearance(
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
     ),
-    discount_min: str | None = Query(None, description="Custom minimum discount percentage."),
-    discount_max: str | None = Query(None, description="Custom maximum discount percentage."),
-    stock_filter: str | None = Query(None, description="Stock preset (quantity or custom)."),
+    discount_min: str | None = Query(
+        None, description="Custom minimum discount percentage."
+    ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
+    stock_filter: str | None = Query(
+        None, description="Stock preset (quantity or custom)."
+    ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
     sort_order: str = Query("newest", description="Sort order key."),
@@ -2010,6 +2161,7 @@ def api_clearance(
     if session_data.get("user_id"):
         from app.auth.dependencies import _get_db_session
         from app.auth.service import AuthService
+
         try:
             db = next(_get_db_session())
             user = AuthService(db).get_user_by_id(session_data["user_id"])
@@ -2090,6 +2242,7 @@ def api_deals(
     if session_data.get("user_id"):
         from app.auth.dependencies import _get_db_session
         from app.auth.service import AuthService
+
         try:
             db = next(_get_db_session())
             user = AuthService(db).get_user_by_id(session_data["user_id"])
@@ -2098,7 +2251,9 @@ def api_deals(
             pass
 
     normalized_category = (category or "").strip() or None
-    raw_items = _select_items(session, scope="all", state=None, category=normalized_category, user=user)
+    raw_items = _select_items(
+        session, scope="all", state=None, category=normalized_category, user=user
+    )
     prepared_items = _prepare_listings(raw_items)
     payload = [_serialize_observation(item) for item in prepared_items]
     return JSONResponse(
@@ -2120,20 +2275,21 @@ def api_stats(session: Session = Depends(get_session)) -> JSONResponse:
 
 def _parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
     """Parse store_name to extract city and state.
-    
+
     Examples:
         "Seattle, WA (#0001)" -> city="Seattle", state="WA"
         "Portland #1234" -> city="Portland", state=""
     """
     city = ""
     state = ""
-    match = re.match(r'^([^,]+),\s*([A-Z]{2})', store_name)
+    match = re.match(r"^([^,]+),\s*([A-Z]{2})", store_name)
     if match:
         city = match.group(1).strip()
         state = match.group(2).strip()
     else:
-        city = re.sub(r'\s*[#(].*', '', store_name).strip()
+        city = re.sub(r"\s*[#(].*", "", store_name).strip()
     return {"city": city, "state": state}
+
 
 @app.post("/api/ingest")
 def ingest_data(
@@ -2157,40 +2313,40 @@ def ingest_data(
             continue
 
         store_id = _normalize_store_number(deal.store_id)
-        
+
         # Resolve store details
         store_details = _canonical_store_details(store_id)
         store_zip = "00000"
         store_city = None
         store_state = None
         store_region = None
-        
+
         if store_details:
-             store_zip = store_details.get("zip") or "00000"
-             store_city = store_details.get("city")
-             store_state = store_details.get("state")
-             if store_state in ("WA", "OR"):
-                 store_region = "WA_OR"
+            store_zip = store_details.get("zip") or "00000"
+            store_city = store_details.get("city")
+            store_state = store_details.get("state")
+            if store_state in ("WA", "OR"):
+                store_region = "WA_OR"
         else:
-             # Fallback: Parse from Gloorbot provided name (critical for FL stores)
-             parsed = _parse_store_info(store_id, deal.store_name)
-             store_city = parsed["city"]
-             store_state = parsed["state"]
-             
-             if store_state == "FL":
-                 store_region = "FL"
-             elif store_state in ("WA", "OR"):
-                 store_region = "WA_OR"
-        
+            # Fallback: Parse from Gloorbot provided name (critical for FL stores)
+            parsed = _parse_store_info(store_id, deal.store_name)
+            store_city = parsed["city"]
+            store_state = parsed["state"]
+
+            if store_state == "FL":
+                store_region = "FL"
+            elif store_state in ("WA", "OR"):
+                store_region = "WA_OR"
+
         # Ensure Store exists
         repo.upsert_store(
-            session, 
-            store_id=store_id, 
-            name=deal.store_name, 
+            session,
+            store_id=store_id,
+            name=deal.store_name,
             zip_code=store_zip,
             city=store_city,
             state=store_state,
-            region=store_region
+            region=store_region,
         )
 
         preferred_category = (deal.category_name or "").strip()
@@ -2201,13 +2357,13 @@ def ingest_data(
 
         # Ensure Item exists
         repo.upsert_item(
-             session,
-             sku=sku,
-             retailer="lowes",
-             title=deal.title,
-             category=category_name,
-             product_url=deal.product_url,
-             image_url=image_url
+            session,
+            sku=sku,
+            retailer="lowes",
+            title=deal.title,
+            category=category_name,
+            product_url=deal.product_url,
+            image_url=image_url,
         )
 
         ts = datetime.fromisoformat(deal.found_at.replace("Z", "+00:00"))
@@ -2225,10 +2381,10 @@ def ingest_data(
             price=deal.price,
             price_was=deal.was_price,
             pct_off=deal.pct_off,
-            availability=None, # Gloorbot doesn't send availability yet
+            availability=None,  # Gloorbot doesn't send availability yet
             product_url=deal.product_url,
             image_url=image_url,
-            clearance=True # Assuming pushed deals are clearance
+            clearance=True,  # Assuming pushed deals are clearance
         )
         repo.insert_observation(session, observation)
 
@@ -2247,12 +2403,14 @@ def ingest_data(
             availability=None,
             product_url=deal.product_url,
             image_url=image_url,
-            clearance=True
+            clearance=True,
         )
         upserted_count += 1
 
     session.commit()
-    LOGGER.info(f"Ingested {upserted_count} deals from {payload.source} (skipped {skipped_count})")
+    LOGGER.info(
+        f"Ingested {upserted_count} deals from {payload.source} (skipped {skipped_count})"
+    )
     return {"ok": True, "count": upserted_count, "skipped": skipped_count}
 
 
@@ -2269,29 +2427,35 @@ def setup_admin_account(session: Session = Depends(get_session)) -> JSONResponse
         auth_service = AuthService(session)
 
         # Check if user exists
-        existing_user = session.query(User).filter(User.email == '93robingattis@gmail.com').first()
+        existing_user = (
+            session.query(User).filter(User.email == "93robingattis@gmail.com").first()
+        )
 
         if existing_user:
             user = existing_user
-            message = f'User already exists with ID: {user.id}'
+            message = f"User already exists with ID: {user.id}"
         else:
             # Create user
             user = auth_service.register_user(
-                email='93robingattis@gmail.com',
-                password='Alphonse5150$',
-                display_name='Robin Gattis'
+                email="93robingattis@gmail.com",
+                password="Alphonse5150$",
+                display_name="Robin Gattis",
             )
-            message = f'Created new user with ID: {user.id}'
+            message = f"Created new user with ID: {user.id}"
 
         # Check if subscription exists
-        existing_sub = session.query(Subscription).filter(Subscription.user_id == user.id).first()
+        existing_sub = (
+            session.query(Subscription).filter(Subscription.user_id == user.id).first()
+        )
 
         if existing_sub:
             # Update to PRO
             existing_sub.plan = SubscriptionPlan.PRO
             existing_sub.status = SubscriptionStatus.ACTIVE
-            existing_sub.current_period_end = datetime.now(timezone.utc) + timedelta(days=365)
-            message += ' | Updated subscription to PRO'
+            existing_sub.current_period_end = datetime.now(timezone.utc) + timedelta(
+                days=365
+            )
+            message += " | Updated subscription to PRO"
 
         session.commit()
 
