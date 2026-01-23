@@ -41,7 +41,11 @@ class AdminService:
         hostname: str | None = None,
     ) -> ScraperHeartbeat:
         """Update or create scraper heartbeat record."""
-        heartbeat = self.session.query(ScraperHeartbeat).filter_by(scraper_id=scraper_id).first()
+        heartbeat = (
+            self.session.query(ScraperHeartbeat)
+            .filter_by(scraper_id=scraper_id)
+            .first()
+        )
 
         now = datetime.now(timezone.utc)
 
@@ -99,7 +103,11 @@ class AdminService:
 
     def mark_scraper_inactive(self, scraper_id: str) -> bool:
         """Mark a scraper as inactive."""
-        heartbeat = self.session.query(ScraperHeartbeat).filter_by(scraper_id=scraper_id).first()
+        heartbeat = (
+            self.session.query(ScraperHeartbeat)
+            .filter_by(scraper_id=scraper_id)
+            .first()
+        )
         if heartbeat:
             heartbeat.is_active = False
             heartbeat.status_message = "Manually deactivated"
@@ -252,7 +260,11 @@ class AdminService:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=expires_in_hours)
 
-        session = self.session.query(ActiveSession).filter_by(session_token=session_token).first()
+        session = (
+            self.session.query(ActiveSession)
+            .filter_by(session_token=session_token)
+            .first()
+        )
 
         if session:
             session.last_activity = now
@@ -274,7 +286,11 @@ class AdminService:
 
     def delete_session(self, session_token: str) -> bool:
         """Delete an active session."""
-        session = self.session.query(ActiveSession).filter_by(session_token=session_token).first()
+        session = (
+            self.session.query(ActiveSession)
+            .filter_by(session_token=session_token)
+            .first()
+        )
         if session:
             self.session.delete(session)
             self.session.commit()
@@ -287,7 +303,9 @@ class AdminService:
         return (
             self.session.query(ActiveSession)
             .filter(ActiveSession.user_id == user_id)
-            .filter((ActiveSession.expires_at == None) | (ActiveSession.expires_at > now))
+            .filter(
+                (ActiveSession.expires_at == None) | (ActiveSession.expires_at > now)
+            )
             .order_by(desc(ActiveSession.last_activity))
             .all()
         )
@@ -297,10 +315,7 @@ class AdminService:
         now = datetime.now(timezone.utc)
         result = self.session.execute(
             delete(ActiveSession).where(
-                and_(
-                    ActiveSession.expires_at != None,
-                    ActiveSession.expires_at < now
-                )
+                and_(ActiveSession.expires_at != None, ActiveSession.expires_at < now)
             )
         )
         self.session.commit()
@@ -317,14 +332,17 @@ class AdminService:
 
         for user in users:
             # Get subscription
-            subscription = self.session.query(Subscription).filter_by(user_id=user.id).first()
+            subscription = (
+                self.session.query(Subscription).filter_by(user_id=user.id).first()
+            )
 
             # Get total spent
             total_spent = (
                 self.session.query(func.sum(PaymentHistory.amount))
                 .filter(PaymentHistory.user_id == user.id)
                 .filter(PaymentHistory.status == "succeeded")
-                .scalar() or 0.0
+                .scalar()
+                or 0.0
             )
 
             # Get last activity
@@ -342,19 +360,29 @@ class AdminService:
             # Get unique IPs
             unique_ips = self.get_unique_ips_for_user(user.id)
 
-            result.append({
-                "user": user,
-                "subscription": subscription,
-                "total_spent": total_spent,
-                "last_activity": last_activity.occurred_at if last_activity else None,
-                "is_online": is_online,
-                "active_sessions_count": len(active_sessions),
-                "unique_ips_count": len(unique_ips),
-                "unique_ips": unique_ips[:5],  # First 5 IPs for display
-            })
+            result.append(
+                {
+                    "user": user,
+                    "subscription": subscription,
+                    "total_spent": total_spent,
+                    "last_activity": last_activity.occurred_at
+                    if last_activity
+                    else None,
+                    "is_online": is_online,
+                    "active_sessions_count": len(active_sessions),
+                    "unique_ips_count": len(unique_ips),
+                    "unique_ips": unique_ips[:5],  # First 5 IPs for display
+                }
+            )
 
         # Sort: online users first, then by last activity
-        result.sort(key=lambda x: (not x["is_online"], x["last_activity"] or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+        result.sort(
+            key=lambda x: (
+                not x["is_online"],
+                x["last_activity"] or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+            reverse=True,
+        )
         return result
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -362,13 +390,22 @@ class AdminService:
     # ──────────────────────────────────────────────────────────────────────────
 
     def delete_deal_by_id(self, deal_id: int) -> bool:
-        """Delete a deal from the store price history."""
+        """Delete a deal (and its bounded history) from store price history."""
         deal = self.session.get(StorePriceHistory, deal_id)
-        if deal:
-            self.session.delete(deal)
-            self.session.commit()
-            return True
-        return False
+        if not deal:
+            return False
+
+        result = self.session.execute(
+            delete(StorePriceHistory).where(
+                and_(
+                    StorePriceHistory.retailer == deal.retailer,
+                    StorePriceHistory.store_id == deal.store_id,
+                    StorePriceHistory.sku == deal.sku,
+                )
+            )
+        )
+        self.session.commit()
+        return (result.rowcount or 0) > 0
 
     def delete_deals_by_sku(self, sku: str) -> int:
         """Delete all deals for a specific SKU."""
@@ -389,7 +426,9 @@ class AdminService:
         result = (
             self.session.query(
                 StorePriceHistory.store_id,
-                func.max(StorePriceHistory.title).label("store_name"),  # Get any store name
+                func.max(StorePriceHistory.title).label(
+                    "store_name"
+                ),  # Get any store name
                 func.avg(StorePriceHistory.pct_off).label("avg_discount"),
                 func.count(StorePriceHistory.id).label("deal_count"),
                 func.max(StorePriceHistory.updated_at).label("last_updated"),
@@ -425,21 +464,24 @@ class AdminService:
         deal_count = (
             self.session.query(func.count(Observation.id))
             .filter(Observation.ts_utc >= cutoff)
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Get unique stores
         unique_stores = (
             self.session.query(func.count(func.distinct(Observation.store_id)))
             .filter(Observation.ts_utc >= cutoff)
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Get unique SKUs
         unique_skus = (
             self.session.query(func.count(func.distinct(Observation.sku)))
             .filter(Observation.ts_utc >= cutoff)
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Calculate rate per minute
@@ -473,7 +515,8 @@ class AdminService:
         users_online = (
             self.session.query(func.count(func.distinct(ActiveSession.user_id)))
             .filter(ActiveSession.expires_at > datetime.now(timezone.utc))
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Subscription breakdown
@@ -510,6 +553,8 @@ class AdminService:
             "users": {
                 "total": total_users,
                 "online": users_online,
-                "subscriptions": {plan.value: count for plan, count in subscription_counts},
+                "subscriptions": {
+                    plan.value: count for plan, count in subscription_counts
+                },
             },
         }

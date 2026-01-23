@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -79,8 +80,12 @@ def test_should_not_alert_price_drop_when_threshold_not_met() -> None:
 
 
 def test_get_clearance_items_filters_by_state(db_session) -> None:
-    store_wa = Store(id="wa", name="Tacoma Lowe's", city="Tacoma", state="WA", zip="98402")
-    store_or = Store(id="or", name="Portland Lowe's", city="Portland", state="OR", zip="97204")
+    store_wa = Store(
+        id="wa", name="Tacoma Lowe's", city="Tacoma", state="WA", zip="98402"
+    )
+    store_or = Store(
+        id="or", name="Portland Lowe's", city="Portland", state="OR", zip="97204"
+    )
     db_session.add_all([store_wa, store_or])
     db_session.flush()
 
@@ -163,7 +168,9 @@ def test_get_clearance_items_filters_by_state(db_session) -> None:
 
 
 def test_list_distinct_categories_sorted(db_session) -> None:
-    store = Store(id="store", name="Everett Lowe's", city="Everett", state="WA", zip="98201")
+    store = Store(
+        id="store", name="Everett Lowe's", city="Everett", state="WA", zip="98201"
+    )
     db_session.add(store)
     db_session.flush()
 
@@ -252,7 +259,10 @@ def test_update_price_history_creates_and_updates(db_session) -> None:
     assert records[0].updated_at > records[0].started_at
 
 
-def test_update_price_history_adds_new_row_on_price_change(db_session) -> None:
+def test_update_price_history_overwrites_on_price_change(
+    db_session, monkeypatch
+) -> None:
+    monkeypatch.setenv("CHEAPSKATER_HISTORY_KEEP_ROWS", "1")
     now = datetime.now(timezone.utc)
     repo.update_price_history(
         db_session,
@@ -286,12 +296,65 @@ def test_update_price_history_adds_new_row_on_price_change(db_session) -> None:
         image_url=None,
         clearance=True,
     )
-    rows = db_session.execute(
-        select(StorePriceHistory).order_by(StorePriceHistory.started_at.asc())
-    ).scalars().all()
+
+    rows = db_session.execute(select(StorePriceHistory)).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].price == 7.5
+
+    # SQLite returns naive datetimes even with timezone=True.
+    assert rows[0].updated_at.replace(tzinfo=timezone.utc) == now + timedelta(hours=5)
+    assert rows[0].started_at.replace(tzinfo=timezone.utc) == now
+
+
+def test_update_price_history_keeps_bounded_history_when_configured(
+    db_session, monkeypatch
+) -> None:
+    monkeypatch.setenv("CHEAPSKATER_HISTORY_KEEP_ROWS", "2")
+
+    now = datetime.now(timezone.utc)
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-1",
+        title="Item One",
+        category="Roofing",
+        ts_utc=now,
+        price=10.0,
+        price_was=15.0,
+        pct_off=0.33,
+        availability="In Stock",
+        product_url="https://example.com/p1",
+        image_url=None,
+        clearance=True,
+    )
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-1",
+        title="Item One",
+        category="Roofing",
+        ts_utc=now + timedelta(hours=5),
+        price=7.5,
+        price_was=15.0,
+        pct_off=0.5,
+        availability="In Stock",
+        product_url="https://example.com/p1",
+        image_url=None,
+        clearance=True,
+    )
+
+    rows = (
+        db_session.execute(
+            select(StorePriceHistory).order_by(StorePriceHistory.updated_at.asc())
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2
-    assert rows[-1].price == 7.5
     assert rows[0].price == 10.0
+    assert rows[1].price == 7.5
 
 
 def test_normalize_availability_records_updates_schema_entries(db_session) -> None:

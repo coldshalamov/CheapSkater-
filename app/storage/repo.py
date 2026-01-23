@@ -54,7 +54,9 @@ def upsert_store(
 ) -> Store:
     store = session.get(Store, store_id)
     if store is None:
-        store = Store(id=store_id, name=name, city=city, state=state, zip=zip_code, region=region)
+        store = Store(
+            id=store_id, name=name, city=city, state=state, zip=zip_code, region=region
+        )
         session.add(store)
     else:
         store.name = name
@@ -118,10 +120,20 @@ def _history_state_matches(
             return value.strip()
         return value
 
+    def _float_equal(
+        left: float | None, right: float | None, *, tol: float = 1e-6
+    ) -> bool:
+        if left is None or right is None:
+            return left is right
+        try:
+            return abs(float(left) - float(right)) <= tol
+        except Exception:
+            return left == right
+
     return (
-        entry.price == price
-        and entry.price_was == price_was
-        and entry.pct_off == pct_off
+        _float_equal(entry.price, price)
+        and _float_equal(entry.price_was, price_was)
+        and _float_equal(entry.pct_off, pct_off)
         and _coerce(entry.availability) == _coerce(availability)
         and entry.clearance == clearance
     )
@@ -149,6 +161,12 @@ def update_price_history(
 
     normalized_availability = normalize_availability(availability)
 
+    keep_history_rows = 2
+    try:
+        keep_history_rows = int(os.getenv("CHEAPSKATER_HISTORY_KEEP_ROWS", "2"))
+    except Exception:
+        keep_history_rows = 2
+
     stmt = (
         select(StorePriceHistory)
         .where(
@@ -156,46 +174,94 @@ def update_price_history(
             StorePriceHistory.store_id == store_id,
             StorePriceHistory.sku == sku,
         )
-        .order_by(StorePriceHistory.updated_at.desc())
+        .order_by(StorePriceHistory.updated_at.desc(), StorePriceHistory.id.desc())
         .limit(1)
     )
     last_entry = session.execute(stmt).scalar_one_or_none()
 
-    if last_entry and _history_state_matches(
-        last_entry,
-        price=price,
-        price_was=price_was,
-        pct_off=pct_off,
-        availability=normalized_availability,
-        clearance=clearance,
-    ):
+    state_matches = False
+    if last_entry:
+        state_matches = _history_state_matches(
+            last_entry,
+            price=price,
+            price_was=price_was,
+            pct_off=pct_off,
+            availability=normalized_availability,
+            clearance=clearance,
+        )
+
+    # Default behavior (keep_history_rows=1): overwrite the last entry for a store/SKU.
+    # If keep_history_rows > 1, we keep a small bounded history for deltas (prev_*).
+    if last_entry and keep_history_rows <= 1:
+        # Preserve first-seen semantics in started_at so the "age" of the listing
+        # remains stable even as price changes. If the clearance flag flips, reset
+        # started_at because the listing's state meaningfully changed.
+        if last_entry.clearance != clearance:
+            last_entry.started_at = ts_utc
+
+        last_entry.updated_at = ts_utc
+        last_entry.price = price
+        last_entry.price_was = price_was
+        last_entry.pct_off = pct_off
+        last_entry.availability = normalized_availability
+        last_entry.product_url = product_url
+        last_entry.title = title
+        last_entry.category = category
+        last_entry.clearance = clearance
+        if image_url:
+            last_entry.image_url = image_url
+        if region is not None:
+            last_entry.region = region
+        entry = last_entry
+
+    elif last_entry and state_matches:
         last_entry.updated_at = ts_utc
         last_entry.product_url = product_url
         last_entry.title = title
         last_entry.category = category
         if image_url:
             last_entry.image_url = image_url
-        return last_entry
+        if region is not None:
+            last_entry.region = region
+        entry = last_entry
 
-    entry = StorePriceHistory(
-        retailer=retailer,
-        store_id=store_id,
-        sku=sku,
-        title=title,
-        category=category,
-        started_at=ts_utc,
-        updated_at=ts_utc,
-        price=price,
-        price_was=price_was,
-        pct_off=pct_off,
-        availability=normalized_availability,
-        product_url=product_url,
-        image_url=image_url,
-        clearance=clearance,
-        region=region,
-    )
-    session.add(entry)
-    session.flush()
+    else:
+        entry = StorePriceHistory(
+            retailer=retailer,
+            store_id=store_id,
+            sku=sku,
+            title=title,
+            category=category,
+            started_at=ts_utc,
+            updated_at=ts_utc,
+            price=price,
+            price_was=price_was,
+            pct_off=pct_off,
+            availability=normalized_availability,
+            product_url=product_url,
+            image_url=image_url,
+            clearance=clearance,
+            region=region,
+        )
+        session.add(entry)
+        session.flush()
+
+    if keep_history_rows > 0:
+        ids_to_delete = session.scalars(
+            select(StorePriceHistory.id)
+            .where(
+                StorePriceHistory.retailer == retailer,
+                StorePriceHistory.store_id == store_id,
+                StorePriceHistory.sku == sku,
+            )
+            .order_by(StorePriceHistory.updated_at.desc(), StorePriceHistory.id.desc())
+            .offset(keep_history_rows)
+        ).all()
+        if ids_to_delete:
+            session.execute(
+                delete(StorePriceHistory).where(StorePriceHistory.id.in_(ids_to_delete))
+            )
+
     return entry
 
 
@@ -306,41 +372,40 @@ def _latest_history_statement(
         order_by=history_alias.updated_at.desc(),
     )
 
-    base = (
-        select(
-            history_alias.id.label("history_id"),
-            history_alias.retailer,
-            history_alias.store_id,
-            history_alias.sku,
-            history_alias.title,
-            history_alias.category,
-            history_alias.started_at.label("price_started_at"),
-            history_alias.updated_at.label("updated_at"),
-            history_alias.price,
-            history_alias.price_was,
-            history_alias.pct_off,
-            history_alias.availability,
-            history_alias.product_url,
-            history_alias.image_url,
-            history_alias.clearance,
-            Store.name.label("store_name"),
-            Store.city.label("store_city"),
-            Store.state.label("store_state"),
-            Store.zip.label("store_zip"),
-            Store.id.label("store_pk"),
-            row_number.label("rn"),
-            first_seen.label("first_seen"),
-            prev_price.label("prev_price"),
-            prev_price_was.label("prev_price_was"),
-            prev_pct_off.label("prev_pct_off"),
-            prev_updated_at.label("prev_updated_at"),
-            prev_clearance.label("prev_clearance"),
-        )
-        .join(Store, Store.id == history_alias.store_id, isouter=True)
-    )
+    base = select(
+        history_alias.id.label("history_id"),
+        history_alias.retailer,
+        history_alias.store_id,
+        history_alias.sku,
+        history_alias.title,
+        history_alias.category,
+        history_alias.started_at.label("price_started_at"),
+        history_alias.updated_at.label("updated_at"),
+        history_alias.price,
+        history_alias.price_was,
+        history_alias.pct_off,
+        history_alias.availability,
+        history_alias.product_url,
+        history_alias.image_url,
+        history_alias.clearance,
+        Store.name.label("store_name"),
+        Store.city.label("store_city"),
+        Store.state.label("store_state"),
+        Store.zip.label("store_zip"),
+        Store.id.label("store_pk"),
+        row_number.label("rn"),
+        first_seen.label("first_seen"),
+        prev_price.label("prev_price"),
+        prev_price_was.label("prev_price_was"),
+        prev_pct_off.label("prev_pct_off"),
+        prev_updated_at.label("prev_updated_at"),
+        prev_clearance.label("prev_clearance"),
+    ).join(Store, Store.id == history_alias.store_id, isouter=True)
 
     subquery = base.subquery()
-    stmt = select(subquery).where(subquery.c.rn == 1).where(subquery.c.clearance.is_(True))
+    stmt = (
+        select(subquery).where(subquery.c.rn == 1).where(subquery.c.clearance.is_(True))
+    )
 
     if region:
         stmt = stmt.join(Store, Store.id == subquery.c.store_id, isouter=True)
@@ -417,7 +482,9 @@ def get_clearance_items(
 ) -> list[dict[str, object]]:
     """Return the latest clearance listings per store/SKU."""
 
-    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
+    stmt, subquery = _latest_history_statement(
+        state=state, category=category, region=region
+    )
     stmt = stmt.order_by(
         subquery.c.pct_off.desc().nullslast(),
         subquery.c.price.asc().nullslast(),
@@ -439,7 +506,9 @@ def get_new_clearance_today(
     """Return items that transitioned to clearance within the last 24 hours."""
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=1)
-    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
+    stmt, subquery = _latest_history_statement(
+        state=state, category=category, region=region
+    )
     stmt = stmt.where(subquery.c.price_started_at >= cutoff).where(
         or_(
             subquery.c.prev_clearance.is_(False),
@@ -465,7 +534,9 @@ def get_older_clearance_items(
     """Return clearance items that are at least min_days_old days old (for free tier)."""
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=min_days_old)
-    stmt, subquery = _latest_history_statement(state=state, category=category, region=region)
+    stmt, subquery = _latest_history_statement(
+        state=state, category=category, region=region
+    )
     stmt = stmt.where(subquery.c.price_started_at <= cutoff)
     stmt = stmt.order_by(
         subquery.c.pct_off.desc().nullslast(),
@@ -547,7 +618,11 @@ def get_latest_timestamp(session: Session) -> datetime | None:
 
 
 def list_distinct_categories(
-    session: Session, *, state: str | None = None, region: str | None = None, min_pct_off: float | None = None
+    session: Session,
+    *,
+    state: str | None = None,
+    region: str | None = None,
+    min_pct_off: float | None = None,
 ) -> list[str]:
     """Return sorted list of categories with active clearance inventory."""
 
@@ -641,7 +716,9 @@ def _row_to_values(row: dict[str, object]) -> list[str]:
     def _fmt(value: object | None) -> str:
         return "" if value is None else f"{value}"
 
-    observed_ts = row.get("ts_utc") or row.get("first_seen") or row.get("price_started_at")
+    observed_ts = (
+        row.get("ts_utc") or row.get("first_seen") or row.get("price_started_at")
+    )
 
     return [
         _ts(observed_ts),
@@ -666,4 +743,3 @@ def _row_to_values(row: dict[str, object]) -> list[str]:
         row.get("product_url", "") or "",
         row.get("image_url", "") or "",
     ]
-

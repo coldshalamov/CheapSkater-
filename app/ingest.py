@@ -41,7 +41,7 @@ INGEST_API_KEY = os.getenv("CHEAPSKATER_INGEST_API_KEY", "")
 
 # Database setup (match dashboard.py)
 BASE_PATH = Path(__file__).resolve().parent
-FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()     
+FALLBACK_DATABASE_FILE = (BASE_PATH.parent / "orwa_lowes.sqlite").resolve()
 DATABASE_FILE = resolve_database_file(fallback=FALLBACK_DATABASE_FILE)
 DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
 
@@ -58,6 +58,7 @@ def get_session():
 
 class GloorbotDeal(BaseModel):
     """Deal format from Gloorbot coordinator."""
+
     store_id: str
     store_name: str
     category_url: str | None = None
@@ -73,6 +74,7 @@ class GloorbotDeal(BaseModel):
 
 class IngestRequest(BaseModel):
     """Batch of deals from Gloorbot."""
+
     source: str = Field(default="gloorbot", description="Source system identifier")
     batch_id: str | None = None
     client_id: str | None = None
@@ -93,10 +95,10 @@ def extract_sku_from_url(product_url: str) -> str | None:
         https://www.lowes.com/pd/Product-Name/5001844889 -> 5001844889
         https://www.lowes.com/pd/DEWALT-Drill/1234567 -> 1234567
     """
-    match = re.search(r'/pd/[^/]+/(\d+)', product_url)
+    match = re.search(r"/pd/[^/]+/(\d+)", product_url)
     if match:
         return match.group(1)
-    match = re.search(r'/(\d{6,})(?:\?|$)', product_url)
+    match = re.search(r"/(\d{6,})(?:\?|$)", product_url)
     if match:
         return match.group(1)
     return None
@@ -109,22 +111,22 @@ def extract_category_from_url(category_url: str) -> str:
         https://www.lowes.com/pl/Power-tools/4294857564 -> Power Tools
         https://www.lowes.com/pl/Drill-bits--Power-tool-accessories/4294857975 -> Drill Bits
     """
-    match = re.search(r'/pl/([^/]+)/\d+', category_url)
+    match = re.search(r"/pl/([^/]+)/\d+", category_url)
     if match:
         raw = match.group(1)
-        parts = raw.split('--')
-        cleaned = parts[0].replace('-', ' ').strip()
+        parts = raw.split("--")
+        cleaned = parts[0].replace("-", " ").strip()
         return cleaned.title()
     return "Clearance"
 
 
 def _calculate_discount_percent(price: float, was_price: float) -> float:
     """Calculate accurate discount percentage.
-    
+
     Args:
         price: Current sale price
         was_price: Original price
-        
+
     Returns:
         Discount percentage (0-100), clamped to valid range
     """
@@ -132,7 +134,7 @@ def _calculate_discount_percent(price: float, was_price: float) -> float:
         return 0.0
     if price >= was_price:
         return 0.0
-    
+
     discount = ((was_price - price) / was_price) * 100.0
     # Clamp to 0-100 range
     return max(0.0, min(100.0, discount))
@@ -145,6 +147,13 @@ def _resolve_category(deal: GloorbotDeal) -> str:
     return extract_category_name(deal.category_url)
 
 
+def normalize_store_id(value: str) -> str:
+    text = (value or "").strip()
+    if text.isdigit() and len(text) < 4:
+        return text.zfill(4)
+    return text
+
+
 def parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
     """Parse store_name to extract city and state.
 
@@ -154,12 +163,12 @@ def parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
     """
     city = ""
     state = ""
-    match = re.match(r'^([^,]+),\s*([A-Z]{2})', store_name)
+    match = re.match(r"^([^,]+),\s*([A-Z]{2})", store_name)
     if match:
         city = match.group(1).strip()
         state = match.group(2).strip()
     else:
-        city = re.sub(r'\s*[#(].*', '', store_name).strip()
+        city = re.sub(r"\s*[#(].*", "", store_name).strip()
     return {"city": city, "state": state}
 
 
@@ -199,42 +208,40 @@ def ingest_deals(
                 errors += 1
                 continue
 
+            store_id = normalize_store_id(deal.store_id)
             category = _resolve_category(deal)
-            store_info = parse_store_info(deal.store_id, deal.store_name)
-            
+            store_info = parse_store_info(store_id, deal.store_name)
+
             # Recalculate discount percentage for accuracy
             # (don't trust the pct_off from Gloorbot, it can be wrong)
             actual_pct_off = _calculate_discount_percent(deal.price, deal.was_price)
 
             # Parse timestamp
             try:
-                ts = datetime.fromisoformat(deal.found_at.replace('Z', '+00:00'))
+                ts = datetime.fromisoformat(deal.found_at.replace("Z", "+00:00"))
             except Exception:
                 ts = datetime.now(timezone.utc)
 
-            # Ensure store exists
-            store = session.get(Store, deal.store_id)
-            if store is None:
-                # Determine region based on state
-                state = store_info["state"]
-                region = "FL" if state == "FL" else ("WA_OR" if state in ("WA", "OR") else None)
-
-                store = Store(
-                    id=deal.store_id,
-                    name=deal.store_name,
-                    city=store_info["city"],
-                    state=state,
-                    zip="",  # Not available from Gloorbot
-                    region=region,
-                )
-                session.add(store)
-                session.flush()
+            # Ensure store exists (upsert so store_id normalization can't create dupes)
+            state = store_info["state"]
+            region = (
+                "FL" if state == "FL" else ("WA_OR" if state in ("WA", "OR") else None)
+            )
+            repo.upsert_store(
+                session,
+                store_id=store_id,
+                name=deal.store_name,
+                zip_code="00000",
+                city=store_info["city"],
+                state=state,
+                region=region,
+            )
 
             # Update price history
             repo.update_price_history(
                 session,
                 retailer="lowes",
-                store_id=deal.store_id,
+                store_id=store_id,
                 sku=sku,
                 title=deal.title[:500],
                 category=category,
@@ -251,7 +258,9 @@ def ingest_deals(
             accepted += 1
 
         except Exception as e:
-            LOGGER.exception("[INGEST] batch_id=%s client_id=%s error=%s", batch_id, client_id, e)
+            LOGGER.exception(
+                "[INGEST] batch_id=%s client_id=%s error=%s", batch_id, client_id, e
+            )
             errors += 1
             continue
 
@@ -261,6 +270,7 @@ def ingest_deals(
     if client_id:
         try:
             from app.admin.service import AdminService
+
             admin_service = AdminService(session)
             admin_service.update_heartbeat(
                 scraper_id=client_id,
@@ -272,44 +282,55 @@ def ingest_deals(
                 hostname=x_gloorbot_hostname or None,
             )
         except Exception as e:
-            LOGGER.warning("[INGEST] batch_id=%s Failed to update heartbeat: %s", batch_id, e)
+            LOGGER.warning(
+                "[INGEST] batch_id=%s Failed to update heartbeat: %s", batch_id, e
+            )
 
     # Trigger notification processing for instant alerts
     if accepted > 0:
         try:
             from app.notifications.processor import process_new_deals
+
             # Build deal dictionaries for notification matching
             notifiable_deals = []
             for deal in request.deals:
                 sku = extract_sku_from_url(deal.product_url)
                 if sku:
                     store_info = parse_store_info(deal.store_id, deal.store_name)
-                    actual_pct_off = _calculate_discount_percent(deal.price, deal.was_price)
-                    notifiable_deals.append({
-                        "sku": sku,
-                        "store_id": deal.store_id,
-                        "store_name": deal.store_name,
-                        "store_state": store_info.get("state", ""),
-                        "store_city": store_info.get("city", ""),
-                        "store_label": deal.store_name,
-                        "title": deal.title,
-                        "category": _resolve_category(deal),
-                        "price": deal.price,
-                        "price_was": deal.was_price,
-                        "pct_off": actual_pct_off,  # Use recalculated value
-                        "product_url": deal.product_url,
-                        "image_url": deal.image_url,
-                    })
-            
+                    actual_pct_off = _calculate_discount_percent(
+                        deal.price, deal.was_price
+                    )
+                    notifiable_deals.append(
+                        {
+                            "sku": sku,
+                            "store_id": deal.store_id,
+                            "store_name": deal.store_name,
+                            "store_state": store_info.get("state", ""),
+                            "store_city": store_info.get("city", ""),
+                            "store_label": deal.store_name,
+                            "title": deal.title,
+                            "category": _resolve_category(deal),
+                            "price": deal.price,
+                            "price_was": deal.was_price,
+                            "pct_off": actual_pct_off,  # Use recalculated value
+                            "product_url": deal.product_url,
+                            "image_url": deal.image_url,
+                        }
+                    )
+
             if notifiable_deals:
                 result = process_new_deals(session, notifiable_deals)
                 LOGGER.info(
                     "[INGEST] batch_id=%s notifications alerts_matched=%s emails_sent=%s",
-                    batch_id, result.get("alerts_matched", 0), result.get("emails_sent", 0)
+                    batch_id,
+                    result.get("alerts_matched", 0),
+                    result.get("emails_sent", 0),
                 )
         except Exception as e:
             # Don't fail ingestion if notifications fail
-            LOGGER.warning("[INGEST] batch_id=%s notification processing error: %s", batch_id, e)
+            LOGGER.warning(
+                "[INGEST] batch_id=%s notification processing error: %s", batch_id, e
+            )
 
     LOGGER.info(
         "[INGEST] batch_id=%s client_id=%s done accepted=%s errors=%s",
@@ -322,7 +343,7 @@ def ingest_deals(
         ok=True,
         accepted=accepted,
         errors=errors,
-        message=f"Processed {len(request.deals)} deals from {request.source}"
+        message=f"Processed {len(request.deals)} deals from {request.source}",
     )
 
 
@@ -363,36 +384,66 @@ def cleanup_database(
         conn = session.connection()
 
         # Preview queries
-        absurd = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE price_was >= 10000")).scalar()
-        implausible = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE (price_was - price) > 5000")).scalar()
-        todays = conn.execute(text("SELECT COUNT(*) FROM store_price_history WHERE date(ts_utc) = date('now')")).scalar()
-        before_total = conn.execute(text("SELECT COUNT(*) FROM store_price_history")).scalar()
+        absurd = conn.execute(
+            text("SELECT COUNT(*) FROM store_price_history WHERE price_was >= 10000")
+        ).scalar()
+        implausible = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM store_price_history WHERE (price_was - price) > 5000"
+            )
+        ).scalar()
+        todays = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM store_price_history WHERE date(ts_utc) = date('now')"
+            )
+        ).scalar()
+        before_total = conn.execute(
+            text("SELECT COUNT(*) FROM store_price_history")
+        ).scalar()
 
-        LOGGER.info("[CLEANUP] Preview - absurd_prices=%d implausible_savings=%d todays_data=%d total=%d",
-                   absurd, implausible, todays, before_total)
+        LOGGER.info(
+            "[CLEANUP] Preview - absurd_prices=%d implausible_savings=%d todays_data=%d total=%d",
+            absurd,
+            implausible,
+            todays,
+            before_total,
+        )
 
         # Execute deletions
         conn.execute(text("DELETE FROM store_price_history WHERE price_was >= 10000"))
         deleted_absurd = conn.rowcount
 
-        conn.execute(text("DELETE FROM store_price_history WHERE (price_was - price) > 5000"))
+        conn.execute(
+            text("DELETE FROM store_price_history WHERE (price_was - price) > 5000")
+        )
         deleted_implausible = conn.rowcount
 
-        conn.execute(text("DELETE FROM store_price_history WHERE date(ts_utc) = date('now')"))
+        conn.execute(
+            text("DELETE FROM store_price_history WHERE date(ts_utc) = date('now')")
+        )
         deleted_todays = conn.rowcount
 
         # Vacuum to reclaim space
         conn.execute(text("VACUUM"))
 
         # Final count
-        after_total = conn.execute(text("SELECT COUNT(*) FROM store_price_history")).scalar()
+        after_total = conn.execute(
+            text("SELECT COUNT(*) FROM store_price_history")
+        ).scalar()
 
         session.commit()
 
         total_deleted = deleted_absurd + deleted_implausible + deleted_todays
 
-        LOGGER.info("[CLEANUP] Complete - deleted_absurd=%d deleted_implausible=%d deleted_todays=%d total_deleted=%d before=%d after=%d",
-                   deleted_absurd, deleted_implausible, deleted_todays, total_deleted, before_total, after_total)
+        LOGGER.info(
+            "[CLEANUP] Complete - deleted_absurd=%d deleted_implausible=%d deleted_todays=%d total_deleted=%d before=%d after=%d",
+            deleted_absurd,
+            deleted_implausible,
+            deleted_todays,
+            total_deleted,
+            before_total,
+            after_total,
+        )
 
         return {
             "ok": True,
@@ -412,7 +463,7 @@ def cleanup_database(
             "final": {
                 "total_rows_after": after_total,
                 "rows_reclaimed": before_total - after_total,
-            }
+            },
         }
     except Exception as e:
         LOGGER.exception("[CLEANUP] Error: %s", e)
