@@ -168,7 +168,10 @@ def _ensure_admin_permissions():
         with session_factory() as session:
             user = session.query(User).filter(User.email == target_email).first()
             if not user:
-                create_admin_user(session)
+                LOGGER.warning(
+                    "Admin bootstrap user %s not found; register/login once then restart",
+                    target_email,
+                )
                 return
 
             changes_made = False
@@ -211,29 +214,6 @@ def _ensure_admin_permissions():
 
     except Exception as e:
         LOGGER.exception(f"Failed to enforce admin permissions: {e}")
-
-
-def create_admin_user(session):
-    from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
-
-    LOGGER.info("Creating admin user: 93robingattis@gmail.com")
-    admin_user = User(
-        email="93robingattis@gmail.com",
-        hashed_password="$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYKwq5qDx1",
-        is_admin=True,
-        is_active=True,
-    )
-    session.add(admin_user)
-    session.flush()
-
-    sub = Subscription(
-        user_id=admin_user.id,
-        plan=SubscriptionPlan.PREMIUM,
-        status=SubscriptionStatus.ACTIVE,
-    )
-    session.add(sub)
-    session.commit()
-    LOGGER.info("Admin user created successfully")
 
 
 _ensure_admin_permissions()

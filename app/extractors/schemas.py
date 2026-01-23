@@ -105,7 +105,7 @@ class ObservationIn(BaseModel):
 
 
 class FlattenedRow(BaseModel):
-    """Combined data row suitable for CSV export."""
+    """Combined data row suitable for export."""
 
     model_config = ConfigDict(from_attributes=True)
 

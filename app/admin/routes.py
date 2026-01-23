@@ -36,13 +36,13 @@ ADMIN_API_KEY = os.getenv("CHEAPSKATER_INGEST_API_KEY", "")
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def require_admin(request: Request) -> User:
     """Dependency to require admin privileges."""
     user = await get_current_user(request)
     if not user.is_admin:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
         )
     return user
 
@@ -51,8 +51,10 @@ async def require_admin(request: Request) -> User:
 # Request/Response Models
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class HeartbeatRequest(BaseModel):
     """Scraper heartbeat data."""
+
     scraper_id: str
     scraper_name: str | None = None
     deals_count: int = 0
@@ -64,6 +66,7 @@ class HeartbeatRequest(BaseModel):
 
 class SystemMessageRequest(BaseModel):
     """System message creation/update."""
+
     message: str
     message_type: str = "info"  # info, warning, error, success
     priority: int = 0
@@ -72,6 +75,7 @@ class SystemMessageRequest(BaseModel):
 
 class DealDeleteRequest(BaseModel):
     """Request to delete a deal."""
+
     deal_id: int | None = None
     sku: str | None = None
 
@@ -79,6 +83,7 @@ class DealDeleteRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # Admin Dashboard UI
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, user: User = Depends(require_admin)):
@@ -88,6 +93,10 @@ async def admin_dashboard(request: Request, user: User = Depends(require_admin))
         admin_service = AdminService(db_session)
         metrics = admin_service.get_dashboard_metrics()
         system_messages = admin_service.get_active_system_messages()
+        q = request.query_params.get("q")
+        recent_deals = admin_service.get_recent_deals(
+            limit=200, q=q, clearance_only=True
+        )
 
         return templates.TemplateResponse(
             "admin/dashboard.html",
@@ -96,6 +105,8 @@ async def admin_dashboard(request: Request, user: User = Depends(require_admin))
                 "user": user,
                 "metrics": metrics,
                 "system_messages": system_messages,
+                "recent_deals": recent_deals,
+                "q": q or "",
                 "active_scope": "admin",
             },
         )
@@ -126,9 +137,7 @@ async def admin_users(request: Request, user: User = Depends(require_admin)):
 
 @router.get("/user/{user_id}", response_class=HTMLResponse)
 async def admin_user_detail(
-    request: Request,
-    user_id: int,
-    user: User = Depends(require_admin)
+    request: Request, user_id: int, user: User = Depends(require_admin)
 ):
     """Render detailed user information page."""
     db_session = next(_get_db_session())
@@ -165,11 +174,12 @@ async def admin_user_detail(
 # Scraper Heartbeat API
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.post("/api/heartbeat")
 async def scraper_heartbeat(
     request: Request,
     data: HeartbeatRequest,
-    x_api_key: str = Depends(lambda r: r.headers.get("X-API-Key", ""))
+    x_api_key: str = Depends(lambda r: r.headers.get("X-API-Key", "")),
 ):
     """Receive heartbeat from scraper."""
     # Validate API key
@@ -235,10 +245,10 @@ async def get_scrapers(user: User = Depends(require_admin)):
 # System Messages API
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.post("/api/system-message")
 async def create_system_message(
-    data: SystemMessageRequest,
-    user: User = Depends(require_admin)
+    data: SystemMessageRequest, user: User = Depends(require_admin)
 ):
     """Create a new system message."""
     db_session = next(_get_db_session())
@@ -249,7 +259,10 @@ async def create_system_message(
         expires_at = None
         if data.expires_hours:
             from datetime import timedelta
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=data.expires_hours)
+
+            expires_at = datetime.now(timezone.utc) + timedelta(
+                hours=data.expires_hours
+            )
 
         message = admin_service.create_system_message(
             message=data.message,
@@ -260,9 +273,7 @@ async def create_system_message(
         )
 
         LOGGER.info(
-            "[ADMIN] User %s created system message: %s",
-            user.email,
-            data.message[:50]
+            "[ADMIN] User %s created system message: %s", user.email, data.message[:50]
         )
 
         return {
@@ -299,10 +310,7 @@ async def get_system_messages():
 
 
 @router.delete("/api/system-message/{message_id}")
-async def delete_system_message(
-    message_id: int,
-    user: User = Depends(require_admin)
-):
+async def delete_system_message(message_id: int, user: User = Depends(require_admin)):
     """Delete a system message."""
     db_session = next(_get_db_session())
     try:
@@ -310,7 +318,9 @@ async def delete_system_message(
         success = admin_service.delete_system_message(message_id)
 
         if success:
-            LOGGER.info("[ADMIN] User %s deleted system message %d", user.email, message_id)
+            LOGGER.info(
+                "[ADMIN] User %s deleted system message %d", user.email, message_id
+            )
             return {"ok": True}
         else:
             raise HTTPException(status_code=404, detail="Message not found")
@@ -322,11 +332,9 @@ async def delete_system_message(
 # Deal Management API
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.delete("/api/deal/{deal_id}")
-async def delete_deal(
-    deal_id: int,
-    user: User = Depends(require_admin)
-):
+async def delete_deal(deal_id: int, user: User = Depends(require_admin)):
     """Delete a deal from the database."""
     db_session = next(_get_db_session())
     try:
@@ -343,17 +351,16 @@ async def delete_deal(
 
 
 @router.delete("/api/deal/sku/{sku}")
-async def delete_deals_by_sku(
-    sku: str,
-    user: User = Depends(require_admin)
-):
+async def delete_deals_by_sku(sku: str, user: User = Depends(require_admin)):
     """Delete all deals for a specific SKU."""
     db_session = next(_get_db_session())
     try:
         admin_service = AdminService(db_session)
         count = admin_service.delete_deals_by_sku(sku)
 
-        LOGGER.info("[ADMIN] User %s deleted %d deals for SKU %s", user.email, count, sku)
+        LOGGER.info(
+            "[ADMIN] User %s deleted %d deals for SKU %s", user.email, count, sku
+        )
         return {"ok": True, "deleted_count": count}
     finally:
         db_session.close()
@@ -362,6 +369,7 @@ async def delete_deals_by_sku(
 # ──────────────────────────────────────────────────────────────────────────────
 # Metrics API
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/api/metrics")
 async def get_admin_metrics(user: User = Depends(require_admin)):
@@ -376,10 +384,7 @@ async def get_admin_metrics(user: User = Depends(require_admin)):
 
 
 @router.get("/api/stores/discounts")
-async def get_store_discounts(
-    hours: int = 24,
-    user: User = Depends(require_admin)
-):
+async def get_store_discounts(hours: int = 24, user: User = Depends(require_admin)):
     """Get average discount percentages by store."""
     db_session = next(_get_db_session())
     try:

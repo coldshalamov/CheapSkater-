@@ -152,6 +152,12 @@
                 {% if group.stores|length > 1 %}
                 <span class="more-badge">+{{ group.stores|length - 1 }} more</span>
                 {% endif %}
+                {% if user and user.is_admin and primary_store.history_id %}
+                <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
+                  <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ primary_store.history_id }}</span>
+                  <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="event.stopPropagation(); adminDeleteDeal('{{ primary_store.history_id }}');">Delete</button>
+                </span>
+                {% endif %}
               </div>
             </div>
             <div class="copy-hint">Click to copy</div>
@@ -173,6 +179,12 @@
                   </div>
                   <div class="store-meta">
                     <span class="store-price-tag">${{ store.price }}</span>
+                    {% if user and user.is_admin and store.history_id %}
+                    <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
+                      <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ store.history_id }}</span>
+                      <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="event.stopPropagation(); adminDeleteDeal('{{ store.history_id }}');">Delete</button>
+                    </span>
+                    {% endif %}
                   </div>
                 </div>
               </div>
@@ -361,6 +373,28 @@
       closeStoreModal();
     }
   });
+
+  async function adminDeleteDeal(historyId) {
+    const idText = String(historyId || '').trim();
+    if (!idText) return;
+
+    if (!confirm(`Delete deal id ${idText}? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/admin/api/deal/${encodeURIComponent(idText)}`, { method: 'DELETE' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showToast('Delete failed', payload?.detail || `HTTP ${response.status}`);
+        return;
+      }
+      showToast('Deleted', `Deal ${idText} removed.`);
+      setTimeout(() => location.reload(), 600);
+    } catch (err) {
+      showToast('Delete failed', err?.message || 'Request failed');
+    }
+  }
 
   function showToast(title, message) {
     const container = document.getElementById('toast-container');

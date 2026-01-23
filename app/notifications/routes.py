@@ -12,9 +12,9 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user, _get_db_session
+from app.auth.dependencies import get_current_user, get_optional_user, _get_db_session
 from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
-from app.auth.stripe_integration import is_stripe_configured, get_stripe_service, PLAN_CONFIG
+from app.auth.stripe_integration import is_stripe_configured, get_stripe_service, PLAN_CONFIG, STRIPE_PRICE_ALERTS
 from app.notifications.models import DealAlert, NotificationLog, NotificationType, NotificationFrequency
 from app.logging_config import get_logger
 from pathlib import Path
@@ -69,10 +69,16 @@ def _count_user_alerts(user: User, session: Session) -> int:
 @router.get("/", response_class=HTMLResponse)
 async def notifications_page(
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     session: Session = Depends(_get_db_session),
 ):
     """Render the notifications management page."""
+    if not user:
+        return RedirectResponse(
+            url="/auth/login?next=/notifications",
+            status_code=303,
+        )
+    
     alerts = session.query(DealAlert).filter(DealAlert.user_id == user.id).all()
     subscription = session.query(Subscription).filter(Subscription.user_id == user.id).first()
     
@@ -93,10 +99,16 @@ async def notifications_page(
 @router.get("/create", response_class=HTMLResponse)
 async def create_alert_page(
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     session: Session = Depends(_get_db_session),
 ):
     """Render the create alert page."""
+    if not user:
+        return RedirectResponse(
+            url="/auth/login?next=/notifications/create",
+            status_code=303,
+        )
+
     # Get available categories from database
     from app.storage import repo
     categories = repo.list_distinct_categories(session)
@@ -134,8 +146,10 @@ async def create_alert(
     alert_count = _count_user_alerts(user, session)
 
     # Premium/Enterprise users get unlimited alerts
+    is_premium = False
     if subscription and subscription.plan in (SubscriptionPlan.PREMIUM, SubscriptionPlan.ENTERPRISE):
-        pass  # No limit for Premium/Enterprise
+        is_premium = True
+        
     # All other users pay $10/month per alert with a max of 10
     elif alert_count >= 10:
         raise HTTPException(
@@ -178,7 +192,7 @@ async def create_alert(
         states=states,
         frequency=freq,
         email_enabled=True,
-        is_active=True,
+        is_active=is_premium,  # Only active immediately for premium
         monthly_price=10.0,
     )
     
@@ -186,8 +200,41 @@ async def create_alert(
     session.commit()
     
     LOGGER.info("Created alert %s for user %s", alert.id, user.id)
+
+    # If premium, just redirect to list
+    if is_premium:
+        return RedirectResponse(url="/notifications", status_code=303)
     
-    return RedirectResponse(url="/notifications", status_code=303)
+    # Otherwise, initiate checkout
+    stripe_service = get_stripe_service()
+    if not stripe_service or not STRIPE_PRICE_ALERTS:
+        # Fallback if stripe not configured (should not happen in prod if selling)
+        LOGGER.warning("Stripe not configured for alerts, creating inactive alert %s", alert.id)
+        return RedirectResponse(url="/notifications?error=Payment+configuration+missing", status_code=303)
+        
+    try:
+        # Ensure user has stripe customer ID
+        if not user.stripe_customer_id:
+            customer_id = stripe_service.create_customer(user.email, user.display_name)
+            user.stripe_customer_id = customer_id
+            session.commit()
+            
+        base_url = str(request.base_url).rstrip("/")
+        session_id, checkout_url = stripe_service.create_checkout_session(
+            customer_id=user.stripe_customer_id,
+            price_id=STRIPE_PRICE_ALERTS,
+            success_url=f"{base_url}/notifications?checkout=success&alert_id={alert.id}",
+            cancel_url=f"{base_url}/notifications?checkout=canceled",
+            metadata={
+                "type": "alert_subscription",
+                "alert_id": str(alert.id),
+                "user_id": str(user.id)
+            }
+        )
+        return RedirectResponse(url=checkout_url, status_code=303)
+    except Exception as e:
+        LOGGER.error("Failed to create alert checkout: %s", e)
+        return RedirectResponse(url="/notifications?error=Payment+initialization+failed", status_code=303)
 
 
 @router.post("/{alert_id}/toggle")

@@ -14,6 +14,12 @@ services:
         value: JZhdARITo9ujVU2OcCaiqkx6ktB7SNh28ouQXz6U2f0=
       - key: PORT
         value: 8000
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM
+        value: 93robingattis@gmail.com
+      - key: SENDGRID_FROM_NAME
+        value: GloorBot Deal Alerts
     disk:
       name: cheapskater-data
       mountPath: /var/data

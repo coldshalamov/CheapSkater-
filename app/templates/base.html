@@ -37,6 +37,9 @@
                 <a href="/notifications"
                     class="nav-link{% if active_scope == 'notifications' %} active{% endif %}">Alerts</a>
                 <a href="/auth/account" class="nav-link{% if active_scope == 'account' %} active{% endif %}">Account</a>
+                {% if user.is_admin %}
+                <a href="/admin" class="nav-link{% if active_scope == 'admin' %} active{% endif %}">Admin</a>
+                {% endif %}
                 {% else %}
                 <a href="/auth/pricing" class="nav-link">Pricing</a>
                 <a href="/auth/login" class="btn btn-primary">Sign In</a>

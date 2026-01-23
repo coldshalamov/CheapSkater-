@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
+from app.notifications.models import DealAlert
 from app.auth.service import AuthService, InvalidCredentials, UserExists, TokenExpired, UserNotFound
 from app.auth.dependencies import get_current_user, get_optional_user, _get_db_session
 from app.auth.stripe_integration import (
@@ -475,6 +476,19 @@ async def stripe_webhook(request: Request):
                             current_period_start=sub_details.get("current_period_start"),
                             current_period_end=sub_details.get("current_period_end"),
                         )
+            
+            # Handle Deal Alert subscriptions
+            metadata = data.get("metadata", {})
+            if metadata.get("type") == "alert_subscription":
+                alert_id = metadata.get("alert_id")
+                subscription_id = data.get("subscription")
+                if alert_id and subscription_id:
+                    alert = db_session.query(DealAlert).filter(DealAlert.id == int(alert_id)).first()
+                    if alert:
+                        alert.is_active = True
+                        alert.stripe_subscription_item_id = subscription_id  # Storing subscription ID here
+                        alert.updated_at = datetime.now(timezone.utc)
+                        db_session.commit()
         
         elif event_type == "customer.subscription.updated":
             subscription_id = data.get("id")
@@ -507,10 +521,19 @@ async def stripe_webhook(request: Request):
                 user = auth_service.get_user_by_stripe_customer(customer_id)
                 if user:
                     auth_service.update_subscription(
-                        user_id=user.id,
                         plan=SubscriptionPlan.FREE,
                         status=SubscriptionStatus.CANCELED,
                     )
+            
+            # Handle Deal Alert cancellations
+            # We don't have metadata here usually, so search by subscription ID
+            subscription_id = data.get("id")
+            if subscription_id:
+                alert = db_session.query(DealAlert).filter(DealAlert.stripe_subscription_item_id == subscription_id).first()
+                if alert:
+                    alert.is_active = False
+                    alert.updated_at = datetime.now(timezone.utc)
+                    db_session.commit()
         
         return {"received": True}
     finally:

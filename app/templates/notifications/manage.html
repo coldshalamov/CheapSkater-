@@ -11,7 +11,12 @@
         <a href="/notifications/create" class="btn btn-primary">Create New Alert</a>
     </div>
 
-    {% if not has_subscription %}
+    {% set has_active_alerts = False %}
+    {% for alert in alerts %}
+    {% if alert.is_active %}{% set has_active_alerts = True %}{% endif %}
+    {% endfor %}
+
+    {% if not has_subscription and not has_active_alerts %}
     <div class="alert" style="background: #fffbeb; border: 1px solid #fde68a; color: #92400e;">
         <div>
             <strong>Access Limited</strong> — Subscription required to enable real-time deal alerts.

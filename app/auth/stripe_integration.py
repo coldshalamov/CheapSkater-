@@ -20,6 +20,8 @@ STRIPE_PRICE_BASIC = os.getenv("STRIPE_PRICE_BASIC", "")  # Stripe Price ID for 
 STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "")  # Stripe Price ID for pro plan
 STRIPE_PRICE_PREMIUM = os.getenv("STRIPE_PRICE_PREMIUM", "")  # Stripe Price ID for premium plan ($200/mo)
 STRIPE_PRICE_ENTERPRISE = os.getenv("STRIPE_PRICE_ENTERPRISE", "")  # Legacy alias for premium
+# Use ALERTS var if set, otherwise fallback to BASIC which was the original $10 alert price
+STRIPE_PRICE_ALERTS = os.getenv("STRIPE_PRICE_ALERTS") or os.getenv("STRIPE_PRICE_BASIC", "")
 
 # Plan configuration
 PLAN_CONFIG = {
@@ -31,7 +33,7 @@ PLAN_CONFIG = {
             "Real-time deal access",
             "Advanced filters & search",
             "Unlimited saved deals",
-            "Export to Excel",
+
             "Don't see your store? Email us!",
         ],
         "cta_text": "Get Pro",
@@ -52,18 +54,7 @@ PLAN_CONFIG = {
         "description": "For power users who want it all",
         "support_email": "devteamrob.helix@gmail.com",
     },
-    # Legacy plans kept for backwards compatibility
-    "basic": {
-        "name": "Basic",
-        "price_monthly": 25.0,
-        "stripe_price_id": STRIPE_PRICE_BASIC,
-        "features": [
-            "Browse all deals",
-            "Basic filters",
-            "5 saved deals",
-        ],
-        "legacy": True,
-    },
+
     "enterprise": {
         "name": "Enterprise",
         "price_monthly": 200.0,
@@ -143,6 +134,7 @@ class StripeService:
         price_id: str,
         success_url: str,
         cancel_url: str,
+        **kwargs,
     ) -> tuple[str, str]:
         """
         Create a Stripe Checkout session for subscription.
@@ -163,6 +155,7 @@ class StripeService:
                 cancel_url=cancel_url,
                 allow_promotion_codes=True,
                 billing_address_collection="required",
+                metadata=kwargs.get("metadata", {}),
             )
             return session.id, session.url
         except stripe.error.StripeError as e:

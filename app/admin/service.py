@@ -389,6 +389,33 @@ class AdminService:
     # Deal Management
     # ──────────────────────────────────────────────────────────────────────────
 
+    def get_recent_deals(
+        self,
+        *,
+        limit: int = 200,
+        q: str | None = None,
+        clearance_only: bool = True,
+    ) -> list[StorePriceHistory]:
+        query = self.session.query(StorePriceHistory)
+        if clearance_only:
+            query = query.filter(StorePriceHistory.clearance == True)
+
+        q_text = (q or "").strip()
+        if q_text:
+            # If you paste a SKU, this finds it. Otherwise it does a loose title match.
+            if q_text.isdigit():
+                query = query.filter(StorePriceHistory.sku == q_text)
+            else:
+                query = query.filter(StorePriceHistory.title.ilike(f"%{q_text}%"))
+
+        return (
+            query.order_by(
+                desc(StorePriceHistory.updated_at), desc(StorePriceHistory.id)
+            )
+            .limit(limit)
+            .all()
+        )
+
     def delete_deal_by_id(self, deal_id: int) -> bool:
         """Delete a deal (and its bounded history) from store price history."""
         deal = self.session.get(StorePriceHistory, deal_id)

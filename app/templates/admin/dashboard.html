@@ -17,7 +17,7 @@
             <div class="flex justify-between items-start">
                 <p>{{ msg.message }}</p>
                 <button onclick="deleteMessage({{ msg.id }})" class="text-gray-500 hover:text-gray-700">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="20" height="20" style="width: 20px; height: 20px;" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
                 </button>
@@ -58,6 +58,92 @@
         </form>
     </div>
 
+    <!-- Deal Management -->
+    <div class="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-2">Deal Management</h2>
+        <p class="text-gray-600 text-sm mb-4">Delete incorrect deals by Deal ID (history_id) or remove every listing for a SKU.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="border border-gray-200 rounded-lg p-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Delete By Deal ID</label>
+                <div class="flex gap-2">
+                    <input id="dealIdInput" type="number" placeholder="e.g. 12345" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <button type="button" onclick="deleteDealById()" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Deal ID is the `history_id` field for the store-specific listing.</p>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Delete All By SKU</label>
+                <div class="flex gap-2">
+                    <input id="skuInput" type="text" placeholder="e.g. 5013523551" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <button type="button" onclick="deleteDealsBySku()" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">This removes the SKU across every store (use carefully).</p>
+            </div>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-3">After deletion, refresh the main dashboard to confirm the listing is gone. The scraper may re-add it if it still exists at Lowe's.</p>
+    </div>
+
+    <!-- Recent Deals -->
+    <div class="bg-white rounded-lg shadow p-6 mb-6">
+        <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
+            <div>
+                <h2 class="text-xl font-semibold">Deals On Site (Recent)</h2>
+                <p class="text-gray-600 text-sm">This is the same database backing the homepage. Click Delete to remove a bad listing.</p>
+            </div>
+            <form method="get" action="/admin" class="flex gap-2">
+                <input name="q" value="{{ q }}" type="text" placeholder="Search SKU or title..." class="w-full md:w-80 px-3 py-2 border border-gray-300 rounded-md" />
+                <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md hover:bg-gray-800">Search</button>
+            </form>
+        </div>
+
+        {% if recent_deals %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Store</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Was</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Off</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
+                        <th class="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for d in recent_deals %}
+                    <tr>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{{ d.id }}</td>
+                        <td class="px-4 py-3 text-sm text-gray-900" style="max-width: 520px;">
+                            <div class="font-medium">{{ d.title }}</div>
+                            {% if d.product_url %}
+                            <a class="text-xs text-blue-700 hover:underline" href="{{ d.product_url }}" target="_blank">open product</a>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ d.store_id }}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ d.sku }}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${{ '%.2f'|format(d.price or 0) }}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.price_was is not none %}${{ '%.2f'|format(d.price_was) }}{% endif %}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.pct_off is not none %}{{ '%.0f'|format((d.pct_off or 0) * 100) }}%{% endif %}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{{ d.updated_at }}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-right">
+                            <button type="button" onclick="deleteDealByIdInline('{{ d.id }}')" class="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-gray-500 text-center py-8">No deals found.</p>
+        {% endif %}
+    </div>
+ 
     <!-- Stats Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <!-- Active Scrapers -->
@@ -69,7 +155,7 @@
                     <p class="text-xs text-gray-500 mt-1">of {{ metrics.scrapers.total_count }} total</p>
                 </div>
                 <div class="p-3 bg-green-100 rounded-full">
-                    <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
                 </div>
@@ -85,7 +171,7 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_hour.total_deals }} in last hour</p>
                 </div>
                 <div class="p-3 bg-blue-100 rounded-full">
-                    <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
                     </svg>
                 </div>
@@ -101,7 +187,7 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.users.online }} online now</p>
                 </div>
                 <div class="p-3 bg-purple-100 rounded-full">
-                    <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
                     </svg>
                 </div>
@@ -117,7 +203,7 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_24_hours.unique_stores }} stores</p>
                 </div>
                 <div class="p-3 bg-orange-100 rounded-full">
-                    <svg class="w-8 h-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
                     </svg>
                 </div>
@@ -248,6 +334,63 @@ async function deleteMessage(messageId) {
         alert('Error: ' + error.message);
     }
 }
+
+async function deleteDealById() {
+    const input = document.getElementById('dealIdInput');
+    const dealId = (input?.value || '').trim();
+    if (!dealId) {
+        alert('Enter a deal id');
+        return;
+    }
+    if (!confirm(`Delete deal id ${dealId}? This cannot be undone.`)) {
+        return;
+    }
+    try {
+        const response = await fetch(`/admin/api/deal/${encodeURIComponent(dealId)}`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            alert(payload?.detail || 'Failed to delete deal');
+            return;
+        }
+        alert('Deleted. Refreshing...');
+        location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function deleteDealByIdInline(dealId) {
+    const input = document.getElementById('dealIdInput');
+    if (input) {
+        input.value = String(dealId || '').trim();
+    }
+    deleteDealById();
+}
+
+async function deleteDealsBySku() {
+    const input = document.getElementById('skuInput');
+    const sku = (input?.value || '').trim();
+    if (!sku) {
+        alert('Enter a SKU');
+        return;
+    }
+    if (!confirm(`Delete ALL deals for SKU ${sku}? This removes it across every store.`)) {
+        return;
+    }
+    try {
+        const response = await fetch(`/admin/api/deal/sku/${encodeURIComponent(sku)}`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            alert(payload?.detail || 'Failed to delete SKU');
+            return;
+        }
+        alert(`Deleted ${payload.deleted_count ?? 0} row(s). Refreshing...`);
+        location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
 
 document.getElementById('messageForm').addEventListener('submit', async (e) => {
     e.preventDefault();

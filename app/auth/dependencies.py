@@ -91,7 +91,7 @@ async def get_current_user(request: Request) -> User:
 
 async def require_subscription(
     request: Request,
-    min_plan: SubscriptionPlan = SubscriptionPlan.BASIC,
+    min_plan: SubscriptionPlan = SubscriptionPlan.PRO,
 ) -> User:
     """
     Require an active subscription at the specified tier or higher.
