@@ -538,6 +538,7 @@ def _apply_filters(
     price_was_max = filters.get("price_was_max")
     price_now_min = filters.get("price_now_min")
     price_now_max = filters.get("price_now_max")
+    search_query = filters.get("search_query")
 
     result: list[dict[str, Any]] = []
     for listing in listings:
@@ -575,6 +576,22 @@ def _apply_filters(
             if price_now is None or price_now > price_now_max:
                 continue
 
+        # Filter by search query (item name, store name, or SKU)
+        if search_query:
+            query_lower = search_query.lower().strip()
+            if query_lower:
+                title = (listing.get("title") or "").lower()
+                sku = (listing.get("sku") or "").lower()
+                store_name = (listing.get("store_name") or "").lower()
+                store_label = (listing.get("store_label") or "").lower()
+                
+                # Check if query appears in any of these fields
+                if not (query_lower in title or 
+                       query_lower in sku or 
+                       query_lower in store_name or 
+                       query_lower in store_label):
+                    continue
+
         result.append(listing)
     return result
 
@@ -593,6 +610,7 @@ def _normalize_filters(
     price_now_min: str | float | None = None,
     price_now_max: str | float | None = None,
     sort_order: str | None,
+    search: str | None = None,
 ) -> dict[str, Any]:
     normalized_time = (
         time_window
@@ -696,6 +714,7 @@ def _normalize_filters(
         "price_now_min": parsed_price_now_min,
         "price_now_max": parsed_price_now_max,
         "sort_choice": sort_choice,
+        "search_query": (search or "").strip() if search else None,
     }
 
 
@@ -1810,8 +1829,67 @@ def metrics() -> dict[str, Any]:
 @app.get("/")
 def list_clearance(
     request: Request,
+    category: str | None = Query(None, description="Optional category filter."),
+    search: str | None = Query(None, description="Search by item name, store, or SKU."),
+    time_window: str = Query("all", description="Time filter window key."),
+    discount_filter: str | None = Query(
+        "50", description="Discount preset (percentage or custom)."
+    ),
+    discount_min: str | None = Query(
+        None, description="Custom minimum discount percentage."
+    ),
+    discount_max: str | None = Query(
+        None, description="Custom maximum discount percentage."
+    ),
+    stock_filter: str | None = Query(
+        None, description="Stock preset (quantity or custom)."
+    ),
+    stock_min: str | None = Query(None, description="Custom minimum stock value."),
+    stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
+    sort_order: str = Query("newest", description="Sort order key."),
+    session: Session = Depends(get_session),
+):
+    """Render the Florida clearance dashboard (default view)."""
+
+    normalized_category = category or None
+    filters = _normalize_filters(
+        time_window=time_window,
+        discount_filter=discount_filter,
+        discount_min=discount_min,
+        discount_max=discount_max,
+        stock_filter=stock_filter,
+        stock_min=stock_min,
+        stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
+        sort_order=sort_order,
+        search=search,
+    )
+
+    return _render_dashboard(
+        request,
+        scope="all",
+        state="FL",
+        region="FL",
+        category=normalized_category,
+        filters=filters,
+        session=session,
+        base_url="",
+    )
+
+
+@app.get("/pnw")
+def list_pnw_clearance(
+    request: Request,
     state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
+    search: str | None = Query(None, description="Search by item name, store, or SKU."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
@@ -1851,6 +1929,7 @@ def list_clearance(
         price_now_min=price_now_min,
         price_now_max=price_now_max,
         sort_order=sort_order,
+        search=search,
     )
 
     return _render_dashboard(
@@ -1861,14 +1940,15 @@ def list_clearance(
         category=normalized_category,
         filters=filters,
         session=session,
-        base_url="",
+        base_url="/pnw",
     )
 
 
-@app.get("/florida")
-def list_florida_clearance(
+@app.get("/new-today")
+def list_new_clearance_today(
     request: Request,
     category: str | None = Query(None, description="Optional category filter."),
+    search: str | None = Query(None, description="Search by item name, store, or SKU."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
@@ -1891,7 +1971,7 @@ def list_florida_clearance(
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
-    """Render the Florida clearance dashboard."""
+    """Render new items for Florida (default)."""
 
     normalized_category = category or None
     filters = _normalize_filters(
@@ -1907,26 +1987,28 @@ def list_florida_clearance(
         price_now_min=price_now_min,
         price_now_max=price_now_max,
         sort_order=sort_order,
+        search=search,
     )
 
     return _render_dashboard(
         request,
-        scope="all",
+        scope="new",
         state="FL",
         region="FL",
         category=normalized_category,
         filters=filters,
         session=session,
-        page_title="Florida Clearance",
-        base_url="/florida",
+        page_title="New Today (Florida)",
+        base_url="",
     )
 
 
-@app.get("/new-today")
-def list_new_clearance_today(
+@app.get("/pnw/new-today")
+def list_pnw_new_today(
     request: Request,
     state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
+    search: str | None = Query(None, description="Search by item name, store, or SKU."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
@@ -1966,6 +2048,7 @@ def list_new_clearance_today(
         price_now_min=price_now_min,
         price_now_max=price_now_max,
         sort_order=sort_order,
+        search=search,
     )
 
     return _render_dashboard(
@@ -1976,64 +2059,7 @@ def list_new_clearance_today(
         category=normalized_category,
         filters=filters,
         session=session,
-        base_url="",
-    )
-
-
-@app.get("/florida/new-today")
-def list_florida_new_clearance_today(
-    request: Request,
-    category: str | None = Query(None, description="Optional category filter."),
-    time_window: str = Query("all", description="Time filter window key."),
-    discount_filter: str | None = Query(
-        "50", description="Discount preset (percentage or custom)."
-    ),
-    discount_min: str | None = Query(
-        None, description="Custom minimum discount percentage."
-    ),
-    discount_max: str | None = Query(
-        None, description="Custom maximum discount percentage."
-    ),
-    stock_filter: str | None = Query(
-        None, description="Stock preset (quantity or custom)."
-    ),
-    stock_min: str | None = Query(None, description="Custom minimum stock value."),
-    stock_max: str | None = Query(None, description="Custom maximum stock value."),
-    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
-    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
-    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
-    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
-    sort_order: str = Query("newest", description="Sort order key."),
-    session: Session = Depends(get_session),
-):
-    """Render new items for Florida."""
-
-    normalized_category = category or None
-    filters = _normalize_filters(
-        time_window=time_window,
-        discount_filter=discount_filter,
-        discount_min=discount_min,
-        discount_max=discount_max,
-        stock_filter=stock_filter,
-        stock_min=stock_min,
-        stock_max=stock_max,
-        price_was_min=price_was_min,
-        price_was_max=price_was_max,
-        price_now_min=price_now_min,
-        price_now_max=price_now_max,
-        sort_order=sort_order,
-    )
-
-    return _render_dashboard(
-        request,
-        scope="new",
-        state="FL",
-        region="FL",
-        category=normalized_category,
-        filters=filters,
-        session=session,
-        page_title="New Today (Florida)",
-        base_url="/florida",
+        base_url="/pnw",
     )
 
 

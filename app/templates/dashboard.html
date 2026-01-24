@@ -88,12 +88,19 @@
     </div>
     <div class="filter-group search-field" style="flex: 1; min-width: 200px;">
       <label for="search" class="form-label">Search</label>
-      <input type="search" id="search" placeholder="SKU, store, etc..." class="form-input">
+      <input type="search" id="search" name="search" placeholder="Item, Store, SKU, etc..." class="form-input"
+        value="{{ request.query_params.get('search', '') }}">
     </div>
     <div class="filter-actions">
       <button type="submit" class="btn btn-primary">Apply Filters</button>
     </div>
   </form>
+
+  <div
+    style="background: #e0f2fe; color: #075985; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1rem; border: 1px solid #7dd3fc; font-size: 0.9rem; text-align: center;">
+    <strong>ℹ️ Sorting:</strong> Newest items are shown first.{% if is_pro %} As a Pro member, up-to-the-minute results
+    are posted instantly to the top of the page.{% endif %}
+  </div>
 
   {% if not is_pro %}
   <div

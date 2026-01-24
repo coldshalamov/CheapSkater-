@@ -28,9 +28,8 @@
             </a>
             <nav class="nav-links">
                 <a href="/"
-                    class="nav-link{% if request.url.path == '/' or request.url.path == '/new-today' %} active{% endif %}">Pacific
-                    NW</a>
-                <a href="/florida" class="nav-link{% if '/florida' in request.url.path %} active{% endif %}">Florida</a>
+                    class="nav-link{% if request.url.path == '/' or request.url.path == '/new-today' %} active{% endif %}">Florida</a>
+                <a href="/pnw" class="nav-link{% if '/pnw' in request.url.path %} active{% endif %}">Pacific NW</a>
                 <a href="/cheapskater"
                     class="nav-link{% if active_scope == 'cheapskater' %} active{% endif %}">Saved</a>
                 {% if user %}
