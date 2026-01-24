@@ -113,9 +113,6 @@ async def register_page(request: Request, error: str | None = None):
     )
 
 
-        db_session.close()
-
-
 @router.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request):
     """Render the forgot password page."""
@@ -268,11 +265,6 @@ async def register(
         return RedirectResponse(url="/auth/account", status_code=303)
     finally:
         db_session.close()
-
-
-    finally:
-        db_session.close()
-
 
 @router.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password(request: Request, email: Annotated[str, Form()]):
