@@ -8,7 +8,8 @@
       {% if is_pro %}
       <span
         style="background: {% if subscription_plan == 'premium' or subscription_plan == 'enterprise' %}linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%){% else %}var(--success-soft){% endif %}; color: {% if subscription_plan == 'premium' or subscription_plan == 'enterprise' %}#78350f{% else %}#065f46{% endif %}; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; border: 1px solid {% if subscription_plan == 'premium' or subscription_plan == 'enterprise' %}#fcd34d{% else %}#a7f3d0{% endif %}; margin-left: 0.5rem; vertical-align: middle; display: inline-block;">
-        {% if subscription_plan == 'premium' or subscription_plan == 'enterprise' %}👑 Premium Account: Live Deals{% else %}⚡ Pro Account: Live Deals{% endif %}
+        {% if subscription_plan == 'premium' or subscription_plan == 'enterprise' %}👑 Premium Account: Live Deals{%
+        else %}⚡ Pro Account: Live Deals{% endif %}
       </span>
       {% endif %}
     </h1>
@@ -65,6 +66,26 @@
         {% endfor %}
       </select>
     </div>
+    <div class="filter-group">
+      <label for="price_was_min" class="form-label">Was Price ($)</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <input type="number" id="price_was_min" name="price_was_min" placeholder="Min"
+          value="{{ filters.price_was_min or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+        <span style="color: var(--text-muted);">-</span>
+        <input type="number" id="price_was_max" name="price_was_max" placeholder="Max"
+          value="{{ filters.price_was_max or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+      </div>
+    </div>
+    <div class="filter-group">
+      <label for="price_now_min" class="form-label">Now Price ($)</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <input type="number" id="price_now_min" name="price_now_min" placeholder="Min"
+          value="{{ filters.price_now_min or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+        <span style="color: var(--text-muted);">-</span>
+        <input type="number" id="price_now_max" name="price_now_max" placeholder="Max"
+          value="{{ filters.price_now_max or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+      </div>
+    </div>
     <div class="filter-group search-field" style="flex: 1; min-width: 200px;">
       <label for="search" class="form-label">Search</label>
       <input type="search" id="search" placeholder="SKU, store, etc..." class="form-input">
@@ -77,9 +98,11 @@
   {% if not is_pro %}
   <div
     style="background: #fffbeb; color: #92400e; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 2rem; border: 1px solid #fcd34d; font-size: 0.95rem; text-align: center;">
-    <strong>🔥 Deals this cheap go fast!</strong> <a
-      href="/auth/pricing" style="color: #b45309; text-decoration: underline; font-weight: 700;">Sign up for Pro</a> to see up-to-the-minute listings, or set up <a
-      href="/notifications/" style="color: #b45309; text-decoration: underline; font-weight: 700;">Email Alerts</a> to get notified the minute an item goes on sale!
+    <strong>🔥 Deals this cheap go fast!</strong> <a href="/auth/pricing"
+      style="color: #b45309; text-decoration: underline; font-weight: 700;">Sign up for Pro</a> to see up-to-the-minute
+    listings, or set up <a href="/notifications/"
+      style="color: #b45309; text-decoration: underline; font-weight: 700;">Email Alerts</a> to get notified the minute
+    an item goes on sale!
   </div>
   {% endif %}
 
@@ -136,6 +159,13 @@
           Discount: {{ group.min_pct_off|int }}% - {{ group.max_pct_off|int }}% off
         </div>
         {% endif %}
+        {% if group.last_seen %}
+        <div
+          style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; display: flex; align-items: center; gap: 0.25rem;">
+          <span style="opacity: 0.7;">🕐</span>
+          <span>Observed {{ format_regional_full_timestamp(group.last_seen, region) }}</span>
+        </div>
+        {% endif %}
         <div class="store-module">
           {% if group.stores %}
           {% set primary_store = group.stores[0] %}
@@ -155,7 +185,8 @@
                 {% if user and user.is_admin and primary_store.history_id %}
                 <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
                   <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ primary_store.history_id }}</span>
-                  <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="event.stopPropagation(); adminDeleteDeal('{{ primary_store.history_id }}');">Delete</button>
+                  <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                    onclick="event.stopPropagation(); adminDeleteDeal('{{ primary_store.history_id }}');">Delete</button>
                 </span>
                 {% endif %}
               </div>
@@ -182,7 +213,8 @@
                     {% if user and user.is_admin and store.history_id %}
                     <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
                       <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ store.history_id }}</span>
-                      <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="event.stopPropagation(); adminDeleteDeal('{{ store.history_id }}');">Delete</button>
+                      <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                        onclick="event.stopPropagation(); adminDeleteDeal('{{ store.history_id }}');">Delete</button>
                     </span>
                     {% endif %}
                   </div>
@@ -198,7 +230,9 @@
         </div>
       </div>
       <div class="deal-card__footer">
-        <button class="btn btn-secondary btn-block" onclick="saveDeal('{{ group.sku }}')">Save Deal</button>
+        <button class="btn btn-secondary btn-block"
+          onclick="saveDeal('{{ group.stores[0].store_id if group.stores else '' }}', '{{ group.sku }}')">Save
+          Deal</button>
       </div>
     </div>
     {% endfor %}
@@ -422,6 +456,69 @@
         toast.remove();
       });
     }, 4000);
+  }
+
+  // Save Deal functionality
+  async function saveDeal(storeId, sku) {
+    if (!storeId || !sku) {
+      showToast('Error', 'Missing store or product information');
+      return;
+    }
+
+    try {
+      const response = await fetch('/cheapskater/save-deal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          store_number: storeId,
+          sku: sku,
+          quantity: 1
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.ok) {
+        // Show success toast with winking emoji
+        showSuccessToast('Deal Saved 😉', 'Added to your saved deals!');
+      } else {
+        showToast('Error', data.detail || 'Failed to save deal');
+      }
+    } catch (error) {
+      console.error('Error saving deal:', error);
+      showToast('Error', 'Failed to save deal. Please try again.');
+    }
+  }
+
+  // Success toast with custom styling
+  function showSuccessToast(title, message) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-success';
+    toast.innerHTML = `
+      <div class="toast-icon">😉</div>
+      <div class="toast-content">
+        <div class="toast-title">${title}</div>
+        <div class="toast-message">${message}</div>
+      </div>
+    `;
+
+    container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+
+    // Remove after 3s
+    setTimeout(() => {
+      toast.classList.remove('show');
+      toast.addEventListener('transitionend', () => {
+        toast.remove();
+      });
+    }, 3000);
   }
 </script>
 {% endblock %}

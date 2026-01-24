@@ -13,12 +13,15 @@
     {% if system_messages %}
     <div class="mb-6 space-y-2">
         {% for msg in system_messages %}
-        <div class="p-4 rounded-lg border-l-4 {% if msg.message_type == 'error' %}bg-red-50 border-red-500 text-red-800{% elif msg.message_type == 'warning' %}bg-yellow-50 border-yellow-500 text-yellow-800{% elif msg.message_type == 'success' %}bg-green-50 border-green-500 text-green-800{% else %}bg-blue-50 border-blue-500 text-blue-800{% endif %}">
+        <div
+            class="p-4 rounded-lg border-l-4 {% if msg.message_type == 'error' %}bg-red-50 border-red-500 text-red-800{% elif msg.message_type == 'warning' %}bg-yellow-50 border-yellow-500 text-yellow-800{% elif msg.message_type == 'success' %}bg-green-50 border-green-500 text-green-800{% else %}bg-blue-50 border-blue-500 text-blue-800{% endif %}">
             <div class="flex justify-between items-start">
                 <p>{{ msg.message }}</p>
                 <button onclick="deleteMessage({{ msg.id }})" class="text-gray-500 hover:text-gray-700">
-                    <svg width="20" height="20" style="width: 20px; height: 20px;" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    <svg width="20" height="20" style="width: 20px; height: 20px;" class="w-5 h-5" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
                     </svg>
                 </button>
             </div>
@@ -33,7 +36,8 @@
         <form id="messageForm" class="space-y-4">
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Message</label>
-                <textarea name="message" required class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="2" placeholder="Enter system-wide message..."></textarea>
+                <textarea name="message" required class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="2"
+                    placeholder="Enter system-wide message..."></textarea>
             </div>
             <div class="grid grid-cols-3 gap-4">
                 <div>
@@ -47,43 +51,53 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                    <input type="number" name="priority" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <input type="number" name="priority" value="0"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md" />
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Expires in (hours)</label>
-                    <input type="number" name="expires_hours" placeholder="Never" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <input type="number" name="expires_hours" placeholder="Never"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md" />
                 </div>
             </div>
-            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Post Message</button>
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Post
+                Message</button>
         </form>
     </div>
 
     <!-- Deal Management -->
     <div class="bg-white rounded-lg shadow p-6 mb-6">
         <h2 class="text-xl font-semibold mb-2">Deal Management</h2>
-        <p class="text-gray-600 text-sm mb-4">Delete incorrect deals by Deal ID (history_id) or remove every listing for a SKU.</p>
+        <p class="text-gray-600 text-sm mb-4">Delete incorrect deals by Deal ID (history_id) or remove every listing for
+            a SKU.</p>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="border border-gray-200 rounded-lg p-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Delete By Deal ID</label>
                 <div class="flex gap-2">
-                    <input id="dealIdInput" type="number" placeholder="e.g. 12345" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                    <button type="button" onclick="deleteDealById()" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
+                    <input id="dealIdInput" type="number" placeholder="e.g. 12345"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <button type="button" onclick="deleteDealById()"
+                        class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
                 </div>
-                <p class="text-xs text-gray-500 mt-2">Deal ID is the `history_id` field for the store-specific listing.</p>
+                <p class="text-xs text-gray-500 mt-2">Deal ID is the `history_id` field for the store-specific listing.
+                </p>
             </div>
 
             <div class="border border-gray-200 rounded-lg p-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Delete All By SKU</label>
                 <div class="flex gap-2">
-                    <input id="skuInput" type="text" placeholder="e.g. 5013523551" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                    <button type="button" onclick="deleteDealsBySku()" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
+                    <input id="skuInput" type="text" placeholder="e.g. 5013523551"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                    <button type="button" onclick="deleteDealsBySku()"
+                        class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">Delete</button>
                 </div>
                 <p class="text-xs text-gray-500 mt-2">This removes the SKU across every store (use carefully).</p>
             </div>
         </div>
 
-        <p class="text-xs text-gray-500 mt-3">After deletion, refresh the main dashboard to confirm the listing is gone. The scraper may re-add it if it still exists at Lowe's.</p>
+        <p class="text-xs text-gray-500 mt-3">After deletion, refresh the main dashboard to confirm the listing is gone.
+            The scraper may re-add it if it still exists at Lowe's.</p>
     </div>
 
     <!-- Recent Deals -->
@@ -91,11 +105,14 @@
         <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-xl font-semibold">Deals On Site (Recent)</h2>
-                <p class="text-gray-600 text-sm">This is the same database backing the homepage. Click Delete to remove a bad listing.</p>
+                <p class="text-gray-600 text-sm">This is the same database backing the homepage. Click Delete to remove
+                    a bad listing.</p>
             </div>
             <form method="get" action="/admin" class="flex gap-2">
-                <input name="q" value="{{ q }}" type="text" placeholder="Search SKU or title..." class="w-full md:w-80 px-3 py-2 border border-gray-300 rounded-md" />
-                <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md hover:bg-gray-800">Search</button>
+                <input name="q" value="{{ q }}" type="text" placeholder="Search SKU or title..."
+                    class="w-full md:w-80 px-3 py-2 border border-gray-300 rounded-md" />
+                <button type="submit"
+                    class="bg-gray-900 text-white px-4 py-2 rounded-md hover:bg-gray-800">Search</button>
             </form>
         </div>
 
@@ -104,14 +121,22 @@
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Store</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Was</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Off</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Store
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Was
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Off
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Updated</th>
                         <th class="px-4 py-3"></th>
                     </tr>
                 </thead>
@@ -122,17 +147,22 @@
                         <td class="px-4 py-3 text-sm text-gray-900" style="max-width: 520px;">
                             <div class="font-medium">{{ d.title }}</div>
                             {% if d.product_url %}
-                            <a class="text-xs text-blue-700 hover:underline" href="{{ d.product_url }}" target="_blank">open product</a>
+                            <a class="text-xs text-blue-700 hover:underline" href="{{ d.product_url }}"
+                                target="_blank">open product</a>
                             {% endif %}
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ d.store_id }}</td>
                         <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ d.sku }}</td>
-                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${{ '%.2f'|format(d.price or 0) }}</td>
-                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.price_was is not none %}${{ '%.2f'|format(d.price_was) }}{% endif %}</td>
-                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.pct_off is not none %}{{ '%.0f'|format((d.pct_off or 0) * 100) }}%{% endif %}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${{ '%.2f'|format(d.price or 0) }}
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.price_was is not none
+                            %}${{ '%.2f'|format(d.price_was) }}{% endif %}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{% if d.pct_off is not none %}{{
+                            '%.0f'|format(d.pct_off or 0) }}%{% endif %}</td>
                         <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{{ d.updated_at }}</td>
                         <td class="px-4 py-3 whitespace-nowrap text-right">
-                            <button type="button" onclick="deleteDealByIdInline('{{ d.id }}')" class="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">Delete</button>
+                            <button type="button" onclick="deleteDealByIdInline('{{ d.id }}')"
+                                class="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">Delete</button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -143,7 +173,7 @@
         <p class="text-gray-500 text-center py-8">No deals found.</p>
         {% endif %}
     </div>
- 
+
     <!-- Stats Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <!-- Active Scrapers -->
@@ -155,7 +185,8 @@
                     <p class="text-xs text-gray-500 mt-1">of {{ metrics.scrapers.total_count }} total</p>
                 </div>
                 <div class="p-3 bg-green-100 rounded-full">
-                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-green-600"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
                 </div>
@@ -171,8 +202,10 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_hour.total_deals }} in last hour</p>
                 </div>
                 <div class="p-3 bg-blue-100 rounded-full">
-                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-blue-600"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
                     </svg>
                 </div>
             </div>
@@ -187,8 +220,11 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.users.online }} online now</p>
                 </div>
                 <div class="p-3 bg-purple-100 rounded-full">
-                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-purple-600"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z">
+                        </path>
                     </svg>
                 </div>
             </div>
@@ -203,8 +239,11 @@
                     <p class="text-xs text-gray-500 mt-1">{{ metrics.ingestion.last_24_hours.unique_stores }} stores</p>
                 </div>
                 <div class="p-3 bg-orange-100 rounded-full">
-                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+                    <svg width="32" height="32" style="width: 32px; height: 32px;" class="w-8 h-8 text-orange-600"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z">
+                        </path>
                     </svg>
                 </div>
             </div>
@@ -222,12 +261,18 @@
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scraper</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Heartbeat</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deals (Session)</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deals (Total)</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Scraper</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Last Heartbeat</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Deals (Session)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Deals (Total)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Errors</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Version</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
@@ -240,12 +285,15 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 <span class="relative">{{ scraper.last_heartbeat }}</span>
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ scraper.deals_session }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ scraper.deals_session }}
+                            </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ scraper.deals_total }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm {% if scraper.errors > 0 %}text-red-600{% else %}text-gray-500{% endif %}">
+                            <td
+                                class="px-6 py-4 whitespace-nowrap text-sm {% if scraper.errors > 0 %}text-red-600{% else %}text-gray-500{% endif %}">
                                 {{ scraper.errors }}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ scraper.version or 'N/A' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ scraper.version or 'N/A' }}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -260,7 +308,8 @@
     <!-- Top Discount Stores -->
     <div class="bg-white rounded-lg shadow mb-6">
         <div class="p-6 border-b border-gray-200">
-            <h2 class="text-xl font-semibold">Top Discount Stores (24h)</h2>
+            <h2 class="text-xl font-semibold">Best Discount Stores (24h)</h2>
+            <p class="text-sm text-gray-600 mt-1">Stores with the highest average clearance discounts</p>
         </div>
         <div class="p-6">
             {% if metrics.stores.top_discounts %}
@@ -268,10 +317,14 @@
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Store</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Discount</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deal Count</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Store</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Avg Discount</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Deal Count</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Last Updated</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
@@ -282,7 +335,8 @@
                                 <div class="text-sm text-gray-500">{{ store.store_id }}</div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                <span
+                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                                     {{ store.avg_discount }}%
                                 </span>
                             </td>
@@ -309,7 +363,8 @@
             <h3 class="text-lg font-semibold mb-2">Browse Deals</h3>
             <p class="text-gray-600 text-sm">View live clearance deals from all stores</p>
         </a>
-        <a href="/api/admin/metrics" target="_blank" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+        <a href="/api/admin/metrics" target="_blank"
+            class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
             <h3 class="text-lg font-semibold mb-2">API Metrics</h3>
             <p class="text-gray-600 text-sm">View raw JSON metrics data</p>
         </a>
@@ -317,112 +372,112 @@
 </div>
 
 <script>
-async function deleteMessage(messageId) {
-    if (!confirm('Delete this system message?')) return;
+    async function deleteMessage(messageId) {
+        if (!confirm('Delete this system message?')) return;
 
-    try {
-        const response = await fetch(`/admin/api/system-message/${messageId}`, {
-            method: 'DELETE'
-        });
+        try {
+            const response = await fetch(`/admin/api/system-message/${messageId}`, {
+                method: 'DELETE'
+            });
 
-        if (response.ok) {
-            location.reload();
-        } else {
-            alert('Failed to delete message');
+            if (response.ok) {
+                location.reload();
+            } else {
+                alert('Failed to delete message');
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
         }
-    } catch (error) {
-        alert('Error: ' + error.message);
     }
-}
 
-async function deleteDealById() {
-    const input = document.getElementById('dealIdInput');
-    const dealId = (input?.value || '').trim();
-    if (!dealId) {
-        alert('Enter a deal id');
-        return;
-    }
-    if (!confirm(`Delete deal id ${dealId}? This cannot be undone.`)) {
-        return;
-    }
-    try {
-        const response = await fetch(`/admin/api/deal/${encodeURIComponent(dealId)}`, { method: 'DELETE' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            alert(payload?.detail || 'Failed to delete deal');
+    async function deleteDealById() {
+        const input = document.getElementById('dealIdInput');
+        const dealId = (input?.value || '').trim();
+        if (!dealId) {
+            alert('Enter a deal id');
             return;
         }
-        alert('Deleted. Refreshing...');
-        location.reload();
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
-}
-
-function deleteDealByIdInline(dealId) {
-    const input = document.getElementById('dealIdInput');
-    if (input) {
-        input.value = String(dealId || '').trim();
-    }
-    deleteDealById();
-}
-
-async function deleteDealsBySku() {
-    const input = document.getElementById('skuInput');
-    const sku = (input?.value || '').trim();
-    if (!sku) {
-        alert('Enter a SKU');
-        return;
-    }
-    if (!confirm(`Delete ALL deals for SKU ${sku}? This removes it across every store.`)) {
-        return;
-    }
-    try {
-        const response = await fetch(`/admin/api/deal/sku/${encodeURIComponent(sku)}`, { method: 'DELETE' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            alert(payload?.detail || 'Failed to delete SKU');
+        if (!confirm(`Delete deal id ${dealId}? This cannot be undone.`)) {
             return;
         }
-        alert(`Deleted ${payload.deleted_count ?? 0} row(s). Refreshing...`);
-        location.reload();
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
-}
-
-
-document.getElementById('messageForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const formData = new FormData(e.target);
-    const data = {
-        message: formData.get('message'),
-        message_type: formData.get('message_type'),
-        priority: parseInt(formData.get('priority') || '0'),
-        expires_hours: formData.get('expires_hours') ? parseInt(formData.get('expires_hours')) : null
-    };
-
-    try {
-        const response = await fetch('/admin/api/system-message', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        });
-
-        if (response.ok) {
+        try {
+            const response = await fetch(`/admin/api/deal/${encodeURIComponent(dealId)}`, { method: 'DELETE' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                alert(payload?.detail || 'Failed to delete deal');
+                return;
+            }
+            alert('Deleted. Refreshing...');
             location.reload();
-        } else {
-            alert('Failed to post message');
+        } catch (error) {
+            alert('Error: ' + error.message);
         }
-    } catch (error) {
-        alert('Error: ' + error.message);
     }
-});
 
-// Auto-refresh metrics every 30 seconds
-setInterval(() => {
-    location.reload();
-}, 30000);
+    function deleteDealByIdInline(dealId) {
+        const input = document.getElementById('dealIdInput');
+        if (input) {
+            input.value = String(dealId || '').trim();
+        }
+        deleteDealById();
+    }
+
+    async function deleteDealsBySku() {
+        const input = document.getElementById('skuInput');
+        const sku = (input?.value || '').trim();
+        if (!sku) {
+            alert('Enter a SKU');
+            return;
+        }
+        if (!confirm(`Delete ALL deals for SKU ${sku}? This removes it across every store.`)) {
+            return;
+        }
+        try {
+            const response = await fetch(`/admin/api/deal/sku/${encodeURIComponent(sku)}`, { method: 'DELETE' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                alert(payload?.detail || 'Failed to delete SKU');
+                return;
+            }
+            alert(`Deleted ${payload.deleted_count ?? 0} row(s). Refreshing...`);
+            location.reload();
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+
+    document.getElementById('messageForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData(e.target);
+        const data = {
+            message: formData.get('message'),
+            message_type: formData.get('message_type'),
+            priority: parseInt(formData.get('priority') || '0'),
+            expires_hours: formData.get('expires_hours') ? parseInt(formData.get('expires_hours')) : null
+        };
+
+        try {
+            const response = await fetch('/admin/api/system-message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                location.reload();
+            } else {
+                alert('Failed to post message');
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    });
+
+    // Auto-refresh metrics every 30 seconds
+    setInterval(() => {
+        location.reload();
+    }, 30000);
 </script>
 {% endblock %}

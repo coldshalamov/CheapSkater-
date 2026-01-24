@@ -11,20 +11,6 @@
         <a href="/notifications/create" class="btn btn-primary">Create New Alert</a>
     </div>
 
-    {% set has_active_alerts = False %}
-    {% for alert in alerts %}
-    {% if alert.is_active %}{% set has_active_alerts = True %}{% endif %}
-    {% endfor %}
-
-    {% if not has_subscription and not has_active_alerts %}
-    <div class="alert" style="background: #fffbeb; border: 1px solid #fde68a; color: #92400e;">
-        <div>
-            <strong>Access Limited</strong> — Subscription required to enable real-time deal alerts.
-            <a href="/auth/pricing" style="font-weight: 700; text-decoration: underline; margin-left: 8px;">View Pricing
-                →</a>
-        </div>
-    </div>
-    {% endif %}
 
     {% if alerts %}
     <div class="alerts-list" style="display: grid; gap: 1rem;">
@@ -41,6 +27,7 @@
                         <span class="alert-tag">{{ alert.alert_type.value|title }}</span>
                         {% if alert.category %}<span class="alert-tag">{{ alert.category }}</span>{% endif %}
                         {% if alert.keywords %}<span class="alert-tag">{{ alert.keywords }}</span>{% endif %}
+                        {% if alert.states %}<span class="alert-tag">{{ alert.states }}</span>{% endif %}
                         <span class="alert-tag">{{ alert.frequency.value|title }}</span>
                     </div>
                 </div>

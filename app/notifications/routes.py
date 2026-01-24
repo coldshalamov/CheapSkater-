@@ -102,24 +102,17 @@ async def create_alert_page(
     user: User | None = Depends(get_optional_user),
     session: Session = Depends(_get_db_session),
 ):
-    """Render the create alert page."""
-    if not user:
-        return RedirectResponse(
-            url="/auth/login?next=/notifications/create",
-            status_code=303,
-        )
-
+    """Render the create alert page - no login required."""
     # Get available categories from database
     from app.storage import repo
     categories = repo.list_distinct_categories(session)
-    
+
     return templates.TemplateResponse(
         "notifications/create.html",
         {
             "request": request,
             "user": user,
             "categories": categories,
-            "has_subscription": _check_subscription(user, session),
             "alert_price": 10.0,
             "active_scope": "notifications",
         },
@@ -137,52 +130,75 @@ async def create_alert(
     max_price: float = Form(None),
     states: str = Form(None),
     frequency: str = Form("instant"),
-    user: User = Depends(get_current_user),
+    email: str = Form(None),
+    user: User | None = Depends(get_optional_user),
     session: Session = Depends(_get_db_session),
 ):
     """Create a new deal alert - $10/month per alert."""
-    # Check alert limits based on subscription tier
-    subscription = session.query(Subscription).filter(Subscription.user_id == user.id).first()
-    alert_count = _count_user_alerts(user, session)
 
-    # Premium/Enterprise users get unlimited alerts
-    is_premium = False
-    if subscription and subscription.plan in (SubscriptionPlan.PREMIUM, SubscriptionPlan.ENTERPRISE):
-        is_premium = True
-        
-    # All other users pay $10/month per alert with a max of 10
-    elif alert_count >= 10:
+    # Determine email to use
+    alert_email = None
+    if user:
+        alert_email = user.email
+        user_id = user.id
+    elif email:
+        # Allow non-logged-in users to create alerts with email
+        alert_email = email.strip().lower()
+        # Check if a user exists with this email
+        existing_user = session.query(User).filter(User.email == alert_email).first()
+        if existing_user:
+            user_id = existing_user.id
+        else:
+            # Create a minimal user record for alert-only users
+            from app.auth.service import AuthService
+            auth_service = AuthService(session)
+            # Generate a random password they won't use
+            import secrets
+            temp_password = secrets.token_urlsafe(32)
+            new_user = auth_service.create_user(alert_email, temp_password, alert_email.split('@')[0])
+            user_id = new_user.id
+            user = new_user
+    else:
+        raise HTTPException(status_code=400, detail="Email address is required")
+
+    # Check alert limit (max 10 per user)
+    alert_count = session.query(DealAlert).filter(
+        DealAlert.user_id == user_id,
+        DealAlert.is_active == True,
+    ).count()
+
+    if alert_count >= 10:
         raise HTTPException(
-            status_code=402,
+            status_code=400,
             detail="Maximum of 10 alerts reached. Please delete an existing alert to create a new one."
         )
-    
+
     # Validate alert type
     try:
         notification_type = NotificationType(alert_type)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid alert type")
-    
+
     # Validate type-specific fields
     if notification_type == NotificationType.CATEGORY and not category:
         raise HTTPException(status_code=400, detail="Category is required for category alerts")
     if notification_type == NotificationType.KEYWORD and not keywords:
         raise HTTPException(status_code=400, detail="Keywords are required for keyword alerts")
-    
+
     # Parse frequency
     try:
         freq = NotificationFrequency(frequency)
     except ValueError:
         freq = NotificationFrequency.INSTANT
-    
+
     # Convert discount to decimal if percentage given
     disc = None
     if min_discount is not None:
         disc = min_discount / 100 if min_discount > 1 else min_discount
-    
-    # Create alert
+
+    # Create alert (inactive until payment)
     alert = DealAlert(
-        user_id=user.id,
+        user_id=user_id,
         name=name,
         alert_type=notification_type,
         category=category if notification_type == NotificationType.CATEGORY else None,
@@ -192,49 +208,45 @@ async def create_alert(
         states=states,
         frequency=freq,
         email_enabled=True,
-        is_active=is_premium,  # Only active immediately for premium
+        is_active=False,  # Will be activated after payment
         monthly_price=10.0,
     )
-    
+
     session.add(alert)
     session.commit()
-    
-    LOGGER.info("Created alert %s for user %s", alert.id, user.id)
 
-    # If premium, just redirect to list
-    if is_premium:
-        return RedirectResponse(url="/notifications", status_code=303)
-    
-    # Otherwise, initiate checkout
+    LOGGER.info("Created alert %s for user %s (email=%s)", alert.id, user_id, alert_email)
+
+    # Initiate Stripe checkout
     stripe_service = get_stripe_service()
     if not stripe_service or not STRIPE_PRICE_ALERTS:
-        # Fallback if stripe not configured (should not happen in prod if selling)
-        LOGGER.warning("Stripe not configured for alerts, creating inactive alert %s", alert.id)
-        return RedirectResponse(url="/notifications?error=Payment+configuration+missing", status_code=303)
-        
+        LOGGER.error("Stripe not configured for alerts")
+        raise HTTPException(status_code=500, detail="Payment system not configured")
+
     try:
         # Ensure user has stripe customer ID
         if not user.stripe_customer_id:
-            customer_id = stripe_service.create_customer(user.email, user.display_name)
+            customer_id = stripe_service.create_customer(alert_email, user.display_name or alert_email)
             user.stripe_customer_id = customer_id
             session.commit()
-            
+
         base_url = str(request.base_url).rstrip("/")
         session_id, checkout_url = stripe_service.create_checkout_session(
             customer_id=user.stripe_customer_id,
             price_id=STRIPE_PRICE_ALERTS,
             success_url=f"{base_url}/notifications?checkout=success&alert_id={alert.id}",
-            cancel_url=f"{base_url}/notifications?checkout=canceled",
+            cancel_url=f"{base_url}/notifications/create?checkout=canceled",
             metadata={
                 "type": "alert_subscription",
                 "alert_id": str(alert.id),
-                "user_id": str(user.id)
+                "user_id": str(user_id),
+                "alert_email": alert_email,
             }
         )
         return RedirectResponse(url=checkout_url, status_code=303)
     except Exception as e:
-        LOGGER.error("Failed to create alert checkout: %s", e)
-        return RedirectResponse(url="/notifications?error=Payment+initialization+failed", status_code=303)
+        LOGGER.error("Failed to create alert checkout: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Payment initialization failed: {str(e)}")
 
 
 @router.post("/{alert_id}/toggle")

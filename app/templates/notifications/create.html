@@ -14,6 +14,16 @@
         </div>
 
         <form method="post" action="/notifications/create" class="auth-form" style="margin-top: 2rem;">
+            {% if not user %}
+            <div class="form-group">
+                <label for="email" class="form-label">Email Address</label>
+                <input type="email" id="email" name="email" required placeholder="you@example.com" class="form-input">
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                    We'll send alerts here and create an account for managing your subscriptions.
+                </p>
+            </div>
+            {% endif %}
+
             <div class="form-group">
                 <label for="name" class="form-label">Alert Name</label>
                 <input type="text" id="name" name="name" required placeholder="e.g., Flooring Deals 70%+"
@@ -21,28 +31,29 @@
             </div>
 
             <div class="form-group">
-                <label class="form-label">Alert Type</label>
+                <label class="form-label">What Would You Like to Be Alerted About?</label>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                     <label
                         style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem; border: 1px solid var(--border-subtle); border-radius: 12px; cursor: pointer; transition: all 0.2s;"
                         class="type-option">
                         <input type="radio" name="alert_type" value="category" checked style="margin-bottom: 12px;">
                         <span style="font-weight: 700;">Category</span>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Watch a department</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Anything in a department?</span>
                     </label>
                     <label
                         style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem; border: 1px solid var(--border-subtle); border-radius: 12px; cursor: pointer; transition: all 0.2s;"
                         class="type-option">
                         <input type="radio" name="alert_type" value="keyword" style="margin-bottom: 12px;">
                         <span style="font-weight: 700;">Keyword</span>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Search for specific terms</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Something Specific?</span>
                     </label>
                 </div>
             </div>
 
             <div class="form-group" id="category-field">
                 <label for="category" class="form-label">Select Category</label>
-                <select id="category" name="category" class="form-input">
+                <select id="category" name="category" class="form-input"
+                    style="background: white; border: 2px solid #e5e7eb;">
                     <option value="">Any Category</option>
                     {% for cat in categories %}
                     <option value="{{ cat }}">{{ cat }}</option>
@@ -52,8 +63,12 @@
 
             <div class="form-group" id="keywords-field" style="display: none;">
                 <label for="keywords" class="form-label">Keywords</label>
-                <input type="text" id="keywords" name="keywords" placeholder="e.g., DeWalt, Makita, Drill"
-                    class="form-input">
+                <div style="position: relative;">
+                    <span
+                        style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 1.1rem;">🔍</span>
+                    <input type="text" id="keywords" name="keywords" placeholder="e.g., DeWalt, Makita, Drill"
+                        class="form-input" style="padding-left: 42px;">
+                </div>
             </div>
 
             <div style="padding: 1.5rem; background: var(--bg-secondary); border-radius: 12px; margin: 2rem 0;">
@@ -62,7 +77,8 @@
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                     <div class="form-group">
                         <label for="min_discount" class="form-label">Min Discount</label>
-                        <select id="min_discount" name="min_discount" class="form-input">
+                        <select id="min_discount" name="min_discount" class="form-input"
+                            style="background: white; border: 2px solid #e5e7eb;">
                             <option value="">Any</option>
                             <option value="50">50%+</option>
                             <option value="70">70%+</option>
@@ -71,10 +87,12 @@
                     </div>
                     <div class="form-group">
                         <label for="states" class="form-label">State</label>
-                        <select id="states" name="states" class="form-input">
-                            <option value="">WA & OR</option>
+                        <select id="states" name="states" class="form-input"
+                            style="background: white; border: 2px solid #e5e7eb;">
+                            <option value="">All States</option>
                             <option value="WA">Washington</option>
                             <option value="OR">Oregon</option>
+                            <option value="FL">Florida</option>
                         </select>
                     </div>
                 </div>

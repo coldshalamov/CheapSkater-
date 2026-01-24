@@ -450,20 +450,22 @@ class AdminService:
         """Calculate average discount percentage per store for recent deals."""
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
+        # Join with Store table to get actual store names
         result = (
             self.session.query(
                 StorePriceHistory.store_id,
-                func.max(StorePriceHistory.title).label(
-                    "store_name"
-                ),  # Get any store name
+                Store.name.label("store_name"),
+                Store.city.label("store_city"),
+                Store.state.label("store_state"),
                 func.avg(StorePriceHistory.pct_off).label("avg_discount"),
                 func.count(StorePriceHistory.id).label("deal_count"),
                 func.max(StorePriceHistory.updated_at).label("last_updated"),
             )
+            .outerjoin(Store, StorePriceHistory.store_id == Store.id)
             .filter(StorePriceHistory.clearance == True)
             .filter(StorePriceHistory.updated_at >= cutoff)
             .filter(StorePriceHistory.pct_off != None)
-            .group_by(StorePriceHistory.store_id)
+            .group_by(StorePriceHistory.store_id, Store.name, Store.city, Store.state)
             .order_by(desc("avg_discount"))
             .all()
         )
@@ -471,7 +473,9 @@ class AdminService:
         return [
             {
                 "store_id": row.store_id,
-                "store_name": row.store_name,
+                "store_name": f"{row.store_city}, {row.store_state} (#{row.store_id})" 
+                    if row.store_city and row.store_state 
+                    else (row.store_name or f"Store #{row.store_id}"),
                 "avg_discount": round(row.avg_discount or 0, 2),
                 "deal_count": row.deal_count,
                 "last_updated": row.last_updated,
@@ -484,29 +488,29 @@ class AdminService:
     # ──────────────────────────────────────────────────────────────────────────
 
     def get_ingestion_rate(self, hours: int = 1) -> dict[str, Any]:
-        """Calculate current ingestion rate based on recent observations."""
+        """Calculate current ingestion rate based on recent price history updates."""
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        # Count deals in the time window
+        # Count deals in the time window (use StorePriceHistory since that's what ingest API writes to)
         deal_count = (
-            self.session.query(func.count(Observation.id))
-            .filter(Observation.ts_utc >= cutoff)
+            self.session.query(func.count(StorePriceHistory.id))
+            .filter(StorePriceHistory.updated_at >= cutoff)
             .scalar()
             or 0
         )
 
         # Get unique stores
         unique_stores = (
-            self.session.query(func.count(func.distinct(Observation.store_id)))
-            .filter(Observation.ts_utc >= cutoff)
+            self.session.query(func.count(func.distinct(StorePriceHistory.store_id)))
+            .filter(StorePriceHistory.updated_at >= cutoff)
             .scalar()
             or 0
         )
 
         # Get unique SKUs
         unique_skus = (
-            self.session.query(func.count(func.distinct(Observation.sku)))
-            .filter(Observation.ts_utc >= cutoff)
+            self.session.query(func.count(func.distinct(StorePriceHistory.sku)))
+            .filter(StorePriceHistory.updated_at >= cutoff)
             .scalar()
             or 0
         )

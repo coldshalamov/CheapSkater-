@@ -323,7 +323,7 @@ SORT_OPTIONS = [
     ("price_high", "Price: High → Low"),
 ]
 DEFAULT_CATEGORY_OPTIONS: list[str] = []
-INITIAL_GROUP_BATCH = 30
+INITIAL_GROUP_BATCH = 1000  # Show all deals (increased from 30 until infinite scroll is implemented)
 _STORE_HOURS_SUFFIX = re.compile(r"\s+\d{1,2}\s*(?:AM|PM)$", re.I)
 _STOCK_COUNT_PATTERN = re.compile(
     r"(?:only|about)?\s*(\d+)\s*(?:left|available|in\s*stock|qty|quantity)", re.I
@@ -534,6 +534,10 @@ def _apply_filters(
     discount_min = filters.get("discount_min")
     stock_min = filters.get("stock_min")
     stock_max = filters.get("stock_max")
+    price_was_min = filters.get("price_was_min")
+    price_was_max = filters.get("price_was_max")
+    price_now_min = filters.get("price_now_min")
+    price_now_max = filters.get("price_now_max")
 
     result: list[dict[str, Any]] = []
     for listing in listings:
@@ -552,6 +556,25 @@ def _apply_filters(
         if stock_max is not None:
             if stock_estimate is None or stock_estimate > stock_max:
                 continue
+
+        # Filter by original "was" price
+        price_was = listing.get("price_was")
+        if price_was_min is not None:
+            if price_was is None or price_was < price_was_min:
+                continue
+        if price_was_max is not None:
+            if price_was is None or price_was > price_was_max:
+                continue
+
+        # Filter by current "now" price
+        price_now = listing.get("price")
+        if price_now_min is not None:
+            if price_now is None or price_now < price_now_min:
+                continue
+        if price_now_max is not None:
+            if price_now is None or price_now > price_now_max:
+                continue
+
         result.append(listing)
     return result
 
@@ -565,6 +588,10 @@ def _normalize_filters(
     stock_filter: str | None,
     stock_min: str | int | None,
     stock_max: str | int | None,
+    price_was_min: str | float | None = None,
+    price_was_max: str | float | None = None,
+    price_now_min: str | float | None = None,
+    price_now_max: str | float | None = None,
     sort_order: str | None,
 ) -> dict[str, Any]:
     normalized_time = (
@@ -621,6 +648,34 @@ def _normalize_filters(
     else:
         stock_choice = "all"
 
+    # Price range filters (was price - original price before discount)
+    parsed_price_was_min = _as_float(price_was_min)
+    parsed_price_was_max = _as_float(price_was_max)
+    if parsed_price_was_min is not None and parsed_price_was_min < 0:
+        parsed_price_was_min = None
+    if parsed_price_was_max is not None and parsed_price_was_max < 0:
+        parsed_price_was_max = None
+    if (
+        parsed_price_was_min is not None
+        and parsed_price_was_max is not None
+        and parsed_price_was_max < parsed_price_was_min
+    ):
+        parsed_price_was_min, parsed_price_was_max = parsed_price_was_max, parsed_price_was_min
+
+    # Price range filters (now price - current discounted price)
+    parsed_price_now_min = _as_float(price_now_min)
+    parsed_price_now_max = _as_float(price_now_max)
+    if parsed_price_now_min is not None and parsed_price_now_min < 0:
+        parsed_price_now_min = None
+    if parsed_price_now_max is not None and parsed_price_now_max < 0:
+        parsed_price_now_max = None
+    if (
+        parsed_price_now_min is not None
+        and parsed_price_now_max is not None
+        and parsed_price_now_max < parsed_price_now_min
+    ):
+        parsed_price_now_min, parsed_price_now_max = parsed_price_now_max, parsed_price_now_min
+
     sort_choice = (
         sort_order if sort_order in {value for value, _ in SORT_OPTIONS} else "newest"
     )
@@ -636,6 +691,10 @@ def _normalize_filters(
         "stock_choice": stock_choice,
         "stock_min": stock_floor,
         "stock_max": stock_ceiling,
+        "price_was_min": parsed_price_was_min,
+        "price_was_max": parsed_price_was_max,
+        "price_now_min": parsed_price_now_min,
+        "price_now_max": parsed_price_now_max,
         "sort_choice": sort_choice,
     }
 
@@ -1768,6 +1827,10 @@ def list_clearance(
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
@@ -1783,6 +1846,10 @@ def list_clearance(
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
         sort_order=sort_order,
     )
 
@@ -1817,6 +1884,10 @@ def list_florida_clearance(
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
@@ -1831,6 +1902,10 @@ def list_florida_clearance(
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
         sort_order=sort_order,
     )
 
@@ -1867,6 +1942,10 @@ def list_new_clearance_today(
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
@@ -1882,6 +1961,10 @@ def list_new_clearance_today(
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
         sort_order=sort_order,
     )
 
@@ -1916,6 +1999,10 @@ def list_florida_new_clearance_today(
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ):
@@ -1930,6 +2017,10 @@ def list_florida_new_clearance_today(
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
         sort_order=sort_order,
     )
 
@@ -2130,6 +2221,10 @@ def api_clearance(
     ),
     stock_min: str | None = Query(None, description="Custom minimum stock value."),
     stock_max: str | None = Query(None, description="Custom maximum stock value."),
+    price_was_min: str | None = Query(None, description="Minimum original price (was price)."),
+    price_was_max: str | None = Query(None, description="Maximum original price (was price)."),
+    price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
+    price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
@@ -2159,6 +2254,10 @@ def api_clearance(
         stock_filter=stock_filter,
         stock_min=stock_min,
         stock_max=stock_max,
+        price_was_min=price_was_min,
+        price_was_max=price_was_max,
+        price_now_min=price_now_min,
+        price_now_max=price_now_max,
         sort_order=sort_order,
     )
     raw_items = _select_items(

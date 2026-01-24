@@ -208,6 +208,19 @@ def ingest_deals(
                 errors += 1
                 continue
 
+            # DEBUG: Log suspicious prices to identify Gloorbot bug
+            if deal.was_price and deal.price and (deal.was_price / deal.price) > 50:
+                LOGGER.warning(
+                    "[INGEST_DEBUG] Suspicious price from Gloorbot: "
+                    "sku=%s, price=$%.2f, was_price=$%.2f (ratio=%.1fx), "
+                    "title=%s",
+                    sku,
+                    deal.price,
+                    deal.was_price,
+                    deal.was_price / deal.price,
+                    deal.title[:60],
+                )
+
             store_id = normalize_store_id(deal.store_id)
             category = _resolve_category(deal)
             store_info = parse_store_info(store_id, deal.store_name)

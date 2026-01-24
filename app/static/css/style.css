@@ -511,6 +511,15 @@ input[type="search"]:focus {
 }
 
 /* Dashboard Header & Text */
+.dashboard .header .nav-link {
+    color: var(--text-primary);
+}
+
+.dashboard .header .nav-link:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--accent-blue);
+}
+
 .dashboard-header h1 {
     font-size: 3rem;
     color: var(--text-primary);
@@ -777,6 +786,11 @@ input[type="search"]:focus {
 .toast-message {
     font-size: 0.9rem;
     color: var(--text-secondary);
+}
+
+.toast-success {
+    border-left-color: var(--success);
+    background: linear-gradient(to right, var(--success-bg), white);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
