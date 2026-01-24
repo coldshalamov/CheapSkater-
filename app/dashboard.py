@@ -1468,25 +1468,23 @@ def _select_items(
 ) -> list[dict[str, Any]]:
     """
     Get clearance items based on scope and user subscription tier.
-    Free tier: only sees deals 5+ days old
+    Free tier: only sees deals 3+ days old
     Pro/Paid tier: sees all deals
     """
-    if scope == "new":
-        # New items are always accessible, OR maybe we want to restrict "new today" to pros?
-        # For now, let's assume the restriction applies generally to the main feed.
-        # Use existing logic for new items.
-        return repo.get_new_clearance_today(
-            session, state=state, category=category, region=region
-        )
-
+    # Pro/Paid users see everything
     if is_paid:
+        if scope == "new":
+            return repo.get_new_clearance_today(
+                session, state=state, category=category, region=region
+            )
         return repo.get_clearance_items(
             session, state=state, category=category, region=region
         )
 
-    # Free tier sees older deals
+    # Free tier sees only older deals (3+ days old)
+    # This applies to BOTH main page and "new today" page
     return repo.get_older_clearance_items(
-        session, state=state, category=category, region=region, min_days_old=5
+        session, state=state, category=category, region=region, min_days_old=3
     )
 
 

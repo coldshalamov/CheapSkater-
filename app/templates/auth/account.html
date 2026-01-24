@@ -74,10 +74,7 @@
                         {{ (user.display_name or user.email)[0]|upper }}
                     </div>
                     <div>
-                        <p style="font-weight: 700; font-size: 1.125rem;">
-                            {% else %}
-                            {{ user.display_name or 'GloorBot Member' }}
-                            {% endif %}
+                        <p style="font-weight: 700; font-size: 1.125rem;">{{ user.display_name or 'GloorBot Member' }}
                         </p>
                         <p style="color: var(--text-secondary); font-size: 0.9rem;">{{ user.email }}
                             {% if user.is_admin %}
@@ -173,7 +170,7 @@
                 {% else %}
                 <!-- Free Tier -->
                 <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">You are currently
-                    using the <strong>Free</strong> plan. Free users can only see deals that are 5+ days old.</p>
+                    using the <strong>Free</strong> plan. Free users can only see deals that are 3+ days old.</p>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     <a href="/auth/pricing" class="btn btn-primary btn-block">Upgrade to Pro ($50/mo)</a>
                     <p style="text-align: center; font-size: 0.8rem; color: var(--text-muted);">
