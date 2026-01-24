@@ -283,3 +283,55 @@ def send_welcome_email(to_email: str, display_name: str | None = None) -> bool:
     except Exception as e:
         LOGGER.error("Welcome email error: %s", e)
         return False
+
+
+def send_password_reset_email(to_email: str, reset_link: str) -> bool:
+    """Send a password reset email."""
+    if not is_email_configured():
+        return False
+        
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="margin: 0; padding: 0; background-color: #0f1218; font-family: 'Helvetica Neue', Arial, sans-serif;">
+        <table style="width: 100%; max-width: 640px; margin: 0 auto; padding: 40px 20px;">
+            <tr>
+                <td style="text-align: center;">
+                    <h1 style="font-size: 30px; margin: 0 0 16px 0; background: linear-gradient(135deg, #d4af37, #f4d03f); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        Reset Your Password
+                    </h1>
+                    <p style="color: #a8b5c8; font-size: 16px; margin: 0 0 24px 0;">
+                        We received a request to reset your password. If you didn't make this request, you can safely ignore this email.
+                    </p>
+                    <table style="width: 100%; background: linear-gradient(145deg, #1a1f2e, #252b3d); border-radius: 12px; padding: 24px; margin: 24px 0;">
+                        <tr>
+                            <td>
+                                <p style="color: #a8b5c8; margin: 0 0 16px 0; font-size: 15px;">Click the button below to set a new password:</p>
+                                <a href="{reset_link}" style="display: inline-block; background: linear-gradient(135deg, #d4af37, #b8860b); color: #1a1f2e; padding: 12px 24px; border-radius: 6px; font-weight: 700; text-decoration: none; font-size: 16px;">
+                                    Reset Password
+                                </a>
+                                <p style="color: #6b7a8f; margin: 16px 0 0 0; font-size: 12px;">Link expires in 24 hours.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    '''
+    
+    try:
+        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        message = Mail(
+            from_email=Email(SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME),
+            to_emails=To(to_email),
+            subject="GloorBot Password Reset Request",
+            html_content=Content("text/html", html),
+        )
+        response = sg.send(message)
+        return response.status_code in (200, 201, 202)
+    except Exception as e:
+        LOGGER.error("Password reset email error: %s", e)
+        return False

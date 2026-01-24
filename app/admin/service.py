@@ -17,6 +17,7 @@ from app.admin.models import (
     IngestionMetrics,
 )
 from app.auth.models import User, Subscription, PaymentHistory
+from app.auth.service import AuthService
 from app.storage.models_sql import StorePriceHistory, Observation, Store
 
 
@@ -384,6 +385,44 @@ class AdminService:
             reverse=True,
         )
         return result
+
+    def delete_user(self, user_id: int) -> bool:
+        """Delete a user and their associated data."""
+        user = self.session.get(User, user_id)
+        if not user:
+            return False
+
+        # 1. Delete active sessions
+        self.session.execute(delete(ActiveSession).where(ActiveSession.user_id == user_id))
+        
+        # 2. Delete user activities
+        self.session.execute(delete(UserActivity).where(UserActivity.user_id == user_id))
+        
+        # 3. Delete subscription
+        self.session.execute(delete(Subscription).where(Subscription.user_id == user_id))
+        
+        # 4. Delete payment history (assuming we want to remove all traces)
+        self.session.execute(delete(PaymentHistory).where(PaymentHistory.user_id == user_id))
+
+        # 5. Delete user
+        self.session.delete(user)
+        self.session.commit()
+        return True
+
+    def reset_user_password(self, user_id: int, new_password: str) -> bool:
+        """Reset a user's password directly."""
+        user = self.session.get(User, user_id)
+        if not user:
+            return False
+            
+        user.password_hash = AuthService.hash_password(new_password)
+        user.updated_at = datetime.now(timezone.utc)
+        # Clear reset tokens
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        self.session.commit()
+        return True
 
     # ──────────────────────────────────────────────────────────────────────────
     # Deal Management

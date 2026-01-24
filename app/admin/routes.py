@@ -80,6 +80,12 @@ class DealDeleteRequest(BaseModel):
     sku: str | None = None
 
 
+class ResetPasswordRequest(BaseModel):
+    """Request to reset a user's password."""
+
+    password: str
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Admin Dashboard UI
 # ──────────────────────────────────────────────────────────────────────────────
@@ -362,6 +368,56 @@ async def delete_deals_by_sku(sku: str, user: User = Depends(require_admin)):
             "[ADMIN] User %s deleted %d deals for SKU %s", user.email, count, sku
         )
         return {"ok": True, "deleted_count": count}
+    finally:
+        db_session.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# User Management API
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@router.delete("/api/user/{user_id}")
+async def delete_user(user_id: int, user: User = Depends(require_admin)):
+    """Delete a user account."""
+    if user.id == user_id:
+        raise HTTPException(
+            status_code=400, detail="You cannot delete your own account while permissions are active."
+        )
+
+    db_session = next(_get_db_session())
+    try:
+        admin_service = AdminService(db_session)
+        success = admin_service.delete_user(user_id)
+
+        if success:
+            LOGGER.info("[ADMIN] User %s deleted user ID %d", user.email, user_id)
+            return {"ok": True}
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    finally:
+        db_session.close()
+
+
+@router.post("/api/user/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: int,
+    data: ResetPasswordRequest,
+    user: User = Depends(require_admin),
+):
+    """Reset a user's password."""
+    db_session = next(_get_db_session())
+    try:
+        admin_service = AdminService(db_session)
+        success = admin_service.reset_user_password(user_id, data.password)
+
+        if success:
+            LOGGER.info(
+                "[ADMIN] User %s reset password for user ID %d", user.email, user_id
+            )
+            return {"ok": True}
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
     finally:
         db_session.close()
 

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionStatus
 from app.notifications.models import DealAlert
+from app.notifications.email_service import send_password_reset_email
 from app.auth.service import AuthService, InvalidCredentials, UserExists, TokenExpired, UserNotFound
 from app.auth.dependencies import get_current_user, get_optional_user, _get_db_session
 from app.auth.stripe_integration import (
@@ -109,6 +110,33 @@ async def register_page(request: Request, error: str | None = None):
             "error": error,
             "active_scope": "register",
         },
+    )
+
+
+        db_session.close()
+
+
+@router.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request):
+    """Render the forgot password page."""
+    if await get_optional_user(request):
+        return RedirectResponse(url="/", status_code=303)
+        
+    return templates.TemplateResponse(
+        "auth/forgot_password.html",
+        {"request": request, "active_scope": "login"}
+    )
+
+
+@router.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request, token: str):
+    """Render the reset password page."""
+    if not token:
+        return RedirectResponse(url="/auth/login", status_code=303)
+
+    return templates.TemplateResponse(
+        "auth/reset_password.html",
+        {"request": request, "token": token, "active_scope": "login"}
     )
 
 
@@ -238,6 +266,95 @@ async def register(
         request.scope["session"]["email"] = user.email
         
         return RedirectResponse(url="/auth/account", status_code=303)
+    finally:
+        db_session.close()
+
+
+    finally:
+        db_session.close()
+
+
+@router.post("/forgot-password", response_class=HTMLResponse)
+async def forgot_password(request: Request, email: Annotated[str, Form()]):
+    """Process forgot password request."""
+    db_session = next(_get_db_session())
+    try:
+        auth_service = AuthService(db_session)
+        token = auth_service.create_reset_token(email)
+        
+        if token:
+            # Generate link
+            base_url = str(request.base_url).rstrip("/")
+            reset_link = f"{base_url}/auth/reset-password?token={token}"
+            
+            # Send email
+            send_password_reset_email(email, reset_link)
+        
+        # Always return success to prevent email enumeration
+        return templates.TemplateResponse(
+            "auth/forgot_password.html",
+            {
+                "request": request,
+                "success": "If an account exists with that email, we have sent password reset instructions.",
+                "active_scope": "login"
+            },
+        )
+    finally:
+        db_session.close()
+
+
+@router.post("/reset-password", response_class=HTMLResponse)
+async def reset_password(
+    request: Request,
+    token: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    confirm_password: Annotated[str, Form()]
+):
+    """Process password reset."""
+    if password != confirm_password:
+        return templates.TemplateResponse(
+            "auth/reset_password.html",
+            {
+                "request": request,
+                "token": token,
+                "error": "Passwords do not match",
+                "active_scope": "login"
+            },
+        )
+        
+    if len(password) < 8:
+         return templates.TemplateResponse(
+            "auth/reset_password.html",
+            {
+                "request": request,
+                "token": token,
+                "error": "Password must be at least 8 characters",
+                "active_scope": "login"
+            },
+        )
+
+    db_session = next(_get_db_session())
+    try:
+        auth_service = AuthService(db_session)
+        try:
+            user = auth_service.reset_password(token, password)
+            
+            # Log the user in automatically
+            request.scope["session"]["user_id"] = user.id
+            request.scope["session"]["email"] = user.email
+            
+            return RedirectResponse(url="/auth/account?message=Password+reset+successful", status_code=303)
+            
+        except (UserNotFound, TokenExpired) as e:
+            return templates.TemplateResponse(
+                "auth/reset_password.html",
+                {
+                    "request": request,
+                    "token": token,
+                    "error": str(e),
+                    "active_scope": "login"
+                },
+            )
     finally:
         db_session.close()
 

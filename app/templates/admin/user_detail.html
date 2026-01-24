@@ -107,6 +107,82 @@
         </div>
     </div>
 
+    <!-- Admin Actions -->
+    <div class="bg-white rounded-lg shadow p-6 mb-8 border-l-4 border-red-500">
+        <h2 class="text-lg font-semibold mb-4 text-red-700">Danger Zone</h2>
+        <div class="space-y-4">
+            <div>
+                <h3 class="text-sm font-medium text-gray-900">Reset Password</h3>
+                <p class="text-xs text-gray-500 mb-2">Manually set a new password for this user.</p>
+                <div class="flex gap-2">
+                    <input type="password" id="newPassword" placeholder="New Password"
+                        class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 sm:text-sm px-3 py-2 border">
+                    <button onclick="resetPassword({{ target_user.id }})"
+                        class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 text-sm">
+                        Reset Password
+                    </button>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-gray-200">
+                <h3 class="text-sm font-medium text-gray-900">Delete Account</h3>
+                <p class="text-xs text-gray-500 mb-2">Permanently remove this user and all related data. This action
+                    cannot be undone.</p>
+                <button onclick="deleteUser({{ target_user.id }})"
+                    class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 text-sm">
+                    Delete User
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function resetPassword(userId) {
+            const password = document.getElementById('newPassword').value;
+            if (!password) {
+                alert('Please enter a new password');
+                return;
+            }
+            if (!confirm('Are you sure you want to reset the password for this user?')) return;
+
+            try {
+                const response = await fetch(`/admin/api/user/${userId}/reset-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert('Password reset successfully');
+                    document.getElementById('newPassword').value = '';
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to reset password'));
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm('CRITICAL WARNING: This will permanently delete the user and ALL their data (subscriptions, history, etc). This cannot be undone. Are you absolutely sure?')) return;
+
+            try {
+                const response = await fetch(`/admin/api/user/${userId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert('User deleted successfully');
+                    window.location.href = '/admin/users';
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to delete user'));
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+    </script>
+
     <!-- Recent Activity Log -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-200">
