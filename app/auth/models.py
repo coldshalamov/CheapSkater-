@@ -39,9 +39,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     
-    # Username/handle
-    username: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
-    
     # Profile
     display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     
