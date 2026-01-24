@@ -17,7 +17,7 @@ from app.admin.models import (
     IngestionMetrics,
 )
 from app.auth.models import User, Subscription, PaymentHistory
-from app.storage.models_sql import StorePriceHistory, Observation
+from app.storage.models_sql import StorePriceHistory, Observation, Store
 
 
 class AdminService:
@@ -473,9 +473,9 @@ class AdminService:
         return [
             {
                 "store_id": row.store_id,
-                "store_name": f"{row.store_city}, {row.store_state} (#{row.store_id})" 
-                    if row.store_city and row.store_state 
-                    else (row.store_name or f"Store #{row.store_id}"),
+                "store_name": f"{row.store_city}, {row.store_state} (#{row.store_id})"
+                if row.store_city and row.store_state
+                else (row.store_name or f"Store #{row.store_id}"),
                 "avg_discount": round(row.avg_discount or 0, 2),
                 "deal_count": row.deal_count,
                 "last_updated": row.last_updated,
