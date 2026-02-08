@@ -70,8 +70,7 @@ class GloorbotDeal(BaseModel):
     was_price: float
     pct_off: float
     clearance: bool = Field(default=False)
-    clearance: bool = Field(default=False)\n    found_at: str  # ISO8601 datetime
-
+    found_at: str  # ISO8601 datetime
 
 class IngestRequest(BaseModel):
     """Batch of deals from Gloorbot."""
