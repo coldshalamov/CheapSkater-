@@ -69,7 +69,7 @@ class GloorbotDeal(BaseModel):
     price: float
     was_price: float
     pct_off: float
-    found_at: str  # ISO8601 datetime
+    clearance: bool = Field(default=False)\n    found_at: str  # ISO8601 datetime
 
 
 class IngestRequest(BaseModel):
@@ -552,3 +552,4 @@ def cleanup_high_value(
     except Exception as e:
         LOGGER.exception("[CLEANUP] Failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
