@@ -83,6 +83,7 @@ async def notifications_page(
     subscription = session.query(Subscription).filter(Subscription.user_id == user.id).first()
     
     return templates.TemplateResponse(
+        request,
         "notifications/manage.html",
         {
             "request": request,
@@ -108,6 +109,7 @@ async def create_alert_page(
     categories = repo.list_distinct_categories(session)
 
     return templates.TemplateResponse(
+        request,
         "notifications/create.html",
         {
             "request": request,

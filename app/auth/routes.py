@@ -86,6 +86,7 @@ async def login_page(request: Request, error: str | None = None, next: str | Non
         return RedirectResponse(url="/", status_code=303)
     
     return templates.TemplateResponse(
+        request,
         "auth/login.html",
         {
             "request": request,
@@ -104,6 +105,7 @@ async def register_page(request: Request, error: str | None = None):
         return RedirectResponse(url="/", status_code=303)
     
     return templates.TemplateResponse(
+        request,
         "auth/register.html",
         {
             "request": request,
@@ -120,8 +122,9 @@ async def forgot_password_page(request: Request):
         return RedirectResponse(url="/", status_code=303)
         
     return templates.TemplateResponse(
+        request,
         "auth/forgot_password.html",
-        {"request": request, "active_scope": "login"}
+        {"request": request, "active_scope": "login"},
     )
 
 
@@ -132,8 +135,9 @@ async def reset_password_page(request: Request, token: str):
         return RedirectResponse(url="/auth/login", status_code=303)
 
     return templates.TemplateResponse(
+        request,
         "auth/reset_password.html",
-        {"request": request, "token": token, "active_scope": "login"}
+        {"request": request, "token": token, "active_scope": "login"},
     )
 
 
@@ -151,6 +155,7 @@ async def account_page(request: Request):
         subscription = auth_service.get_subscription(user.id)
         
         return templates.TemplateResponse(
+            request,
             "auth/account.html",
             {
                 "request": request,
@@ -183,6 +188,7 @@ async def pricing_page(request: Request):
             db_session.close()
     
     return templates.TemplateResponse(
+        request,
         "auth/pricing.html",
         {
             "request": request,
@@ -286,11 +292,12 @@ async def forgot_password(request: Request, email: Annotated[str, Form()]):
         
         # Always return success to prevent email enumeration
         return templates.TemplateResponse(
+            request,
             "auth/forgot_password.html",
             {
                 "request": request,
                 "success": "If an account exists with that email, we have sent password reset instructions.",
-                "active_scope": "login"
+                "active_scope": "login",
             },
         )
     finally:
@@ -307,23 +314,25 @@ async def reset_password(
     """Process password reset."""
     if password != confirm_password:
         return templates.TemplateResponse(
+            request,
             "auth/reset_password.html",
             {
                 "request": request,
                 "token": token,
                 "error": "Passwords do not match",
-                "active_scope": "login"
+                "active_scope": "login",
             },
         )
         
     if len(password) < 8:
          return templates.TemplateResponse(
+            request,
             "auth/reset_password.html",
             {
                 "request": request,
                 "token": token,
                 "error": "Password must be at least 8 characters",
-                "active_scope": "login"
+                "active_scope": "login",
             },
         )
 
@@ -341,12 +350,13 @@ async def reset_password(
             
         except (UserNotFound, TokenExpired) as e:
             return templates.TemplateResponse(
+                request,
                 "auth/reset_password.html",
                 {
                     "request": request,
                     "token": token,
                     "error": str(e),
-                    "active_scope": "login"
+                    "active_scope": "login",
                 },
             )
     finally:

@@ -105,6 +105,7 @@ async def admin_dashboard(request: Request, user: User = Depends(require_admin))
         )
 
         return templates.TemplateResponse(
+            request,
             "admin/dashboard.html",
             {
                 "request": request,
@@ -129,6 +130,7 @@ async def admin_users(request: Request, user: User = Depends(require_admin)):
         users_with_stats = admin_service.get_all_users_with_stats()
 
         return templates.TemplateResponse(
+            request,
             "admin/users.html",
             {
                 "request": request,
@@ -161,6 +163,7 @@ async def admin_user_detail(
         active_sessions = admin_service.get_active_sessions_for_user(user_id)
 
         return templates.TemplateResponse(
+            request,
             "admin/user_detail.html",
             {
                 "request": request,

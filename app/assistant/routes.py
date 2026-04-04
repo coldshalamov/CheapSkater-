@@ -106,6 +106,7 @@ async def assistant_page(
     last_updated = datetime.now(timezone.utc)
 
     return templates.TemplateResponse(
+        request,
         "assistant.html",
         {
             "request": request,

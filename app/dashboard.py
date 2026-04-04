@@ -1611,6 +1611,7 @@ def cheapskater_view(request: Request):
             pass
 
     return templates.TemplateResponse(
+        request,
         "cheapskater.html",
         {
             "request": request,
@@ -1820,6 +1821,7 @@ def _render_dashboard(
             page_title += " (Pacific NW)"
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
             "request": request,
