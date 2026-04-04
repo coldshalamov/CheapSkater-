@@ -55,7 +55,32 @@
 
     <footer class="site-footer">
         <div class="container">
-            <p>&copy; {{ now.year if now else '2026' }} Lowebot. Tracking Lowe's Clearance across America.</p>
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="footer-brand-name">Lowebot</div>
+                    <p>Your real-time clearance deal tracker for Lowe's stores. Find 50-90% off deals before they disappear.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-links-col">
+                        <h4>Browse</h4>
+                        <a href="/">Florida Deals</a>
+                        <a href="/pnw">Pacific NW Deals</a>
+                        <a href="/cheapskater">Saved Deals</a>
+                    </div>
+                    <div class="footer-links-col">
+                        <h4>Account</h4>
+                        <a href="/auth/pricing">Plans & Pricing</a>
+                        <a href="/notifications">Email Alerts</a>
+                        <a href="/auth/login">Sign In</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; {{ now.year if now else '2026' }} Lowebot. All rights reserved.</p>
+                <div class="footer-stats">
+                    <span>Tracking clearance across America</span>
+                </div>
+            </div>
         </div>
     </footer>
     {% block extra_scripts %}{% endblock %}
