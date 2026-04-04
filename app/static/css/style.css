@@ -326,7 +326,7 @@ button {
 
 .deals-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
     gap: 24px;
     align-items: stretch;
     /* Cards in same row match height */
@@ -1245,17 +1245,20 @@ input[type="text"]:focus,
    VISUAL URGENCY SYSTEM
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Discount tier left borders */
-.deal-card.urgency-good {
-    border-left: 4px solid var(--urgency-good);
+/* Urgency colors on the discount pill */
+.deal-card__discount.urgency-good {
+    background: var(--urgency-good);
+    color: white;
 }
 
-.deal-card.urgency-great {
-    border-left: 4px solid var(--urgency-great);
+.deal-card__discount.urgency-great {
+    background: var(--urgency-great);
+    color: white;
 }
 
-.deal-card.urgency-incredible {
-    border-left: 4px solid var(--urgency-incredible);
+.deal-card__discount.urgency-incredible {
+    background: var(--urgency-incredible);
+    color: white;
 }
 
 /* HOT deal badge */
