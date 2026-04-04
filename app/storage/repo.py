@@ -531,13 +531,20 @@ def get_older_clearance_items(
     region: str | None = None,
     min_days_old: int = 5,
 ) -> list[dict[str, object]]:
-    """Return clearance items that are at least min_days_old days old (for free tier)."""
+    """Return clearance items that are at least min_days_old days old (for free tier).
+
+    Important: "age" for the paywall is based on *last seen* time, not when the
+    clearance price first started. Otherwise an item that went on clearance 2
+    weeks ago but was scraped 5 minutes ago would look "fresh" in the UI even
+    for free users.
+    """
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=min_days_old)
     stmt, subquery = _latest_history_statement(
         state=state, category=category, region=region
     )
-    stmt = stmt.where(subquery.c.price_started_at <= cutoff)
+    # Filter by last observation time to enforce the 72h delayed view.
+    stmt = stmt.where(func.coalesce(subquery.c.updated_at, subquery.c.price_started_at) <= cutoff)
     stmt = stmt.order_by(
         subquery.c.pct_off.desc().nullslast(),
         subquery.c.price_started_at.desc(),

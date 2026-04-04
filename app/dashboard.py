@@ -1525,6 +1525,22 @@ def _is_paid_user(session: Session, user: Any | None) -> bool:
     return is_paid
 
 
+def _load_user_from_request(session: Session, request: Request) -> Any | None:
+    """Best-effort load the logged-in user for this request (or None)."""
+
+    session_data = request.scope.get("session", {})
+    user_id = session_data.get("user_id")
+    if not user_id:
+        return None
+
+    try:
+        from app.auth.service import AuthService
+
+        return AuthService(session).get_user_by_id(user_id)
+    except Exception:
+        return None
+
+
 def _select_items(
     session: Session,
     *,
@@ -1752,19 +1768,7 @@ def _render_dashboard(
         extra={"scope": scope, "state": state, "category": category, "region": region},
     )
 
-    # Get user from session FIRST so we can use it for data filtering
-    user = None
-    session_data = request.scope.get("session", {})
-    if session_data.get("user_id"):
-        try:
-            from app.auth.service import AuthService
-
-            user = AuthService(session).get_user_by_id(session_data["user_id"])
-            if user:
-                LOGGER.debug(f"Loaded user {user.email} (ID: {user.id}) from session")
-        except Exception as e:
-            LOGGER.error(f"Failed to load user from session: {e}")
-            pass
+    user = _load_user_from_request(session, request)
 
     is_pro, subscription_plan = _get_user_subscription_info(session, user)
     if user:
@@ -2349,19 +2353,8 @@ def api_clearance(
 ) -> JSONResponse:
     """Return clearance items as JSON data."""
 
-    # Get user for subscription check
-    user = None
-    session_data = request.scope.get("session", {})
-    if session_data.get("user_id"):
-        from app.auth.dependencies import _get_db_session
-        from app.auth.service import AuthService
-
-        try:
-            db = next(_get_db_session())
-            user = AuthService(db).get_user_by_id(session_data["user_id"])
-            db.close()
-        except Exception:
-            pass
+    user = _load_user_from_request(session, request)
+    is_pro, _subscription_plan = _get_user_subscription_info(session, user)
 
     normalized_state = _normalize_state(state)
     normalized_category = category or None
@@ -2386,6 +2379,7 @@ def api_clearance(
         state=None,
         category=normalized_category,
         user=user,
+        is_paid=is_pro,
     )
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, normalized_state)
@@ -2435,23 +2429,17 @@ def api_deals(
 ) -> JSONResponse:
     """Return clearance deals as a simple list (category-filterable)."""
 
-    # Get user for subscription check
-    user = None
-    session_data = request.scope.get("session", {})
-    if session_data.get("user_id"):
-        from app.auth.dependencies import _get_db_session
-        from app.auth.service import AuthService
-
-        try:
-            db = next(_get_db_session())
-            user = AuthService(db).get_user_by_id(session_data["user_id"])
-            db.close()
-        except Exception:
-            pass
+    user = _load_user_from_request(session, request)
+    is_pro, _subscription_plan = _get_user_subscription_info(session, user)
 
     normalized_category = (category or "").strip() or None
     raw_items = _select_items(
-        session, scope="all", state=None, category=normalized_category, user=user
+        session,
+        scope="all",
+        state=None,
+        category=normalized_category,
+        user=user,
+        is_paid=is_pro,
     )
     prepared_items = _prepare_listings(raw_items)
     payload = [_serialize_observation(item) for item in prepared_items]
