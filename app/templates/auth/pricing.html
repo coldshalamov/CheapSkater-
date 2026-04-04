@@ -4,8 +4,7 @@
 <section class="pricing">
     <div class="pricing-header">
         <h1>Plans & Pricing</h1>
-        <p style="color: var(--text-secondary); font-size: 1.25rem;">Unlock the full power of Lowebot for serious deal
-            hunting.</p>
+        <p class="pricing-subtitle">Unlock the full power of Lowebot for serious deal hunting.</p>
     </div>
 
     <div class="pricing-grid">
@@ -15,7 +14,7 @@
                 <h2 class="plan-name">Free</h2>
                 <div class="plan-price">
                     <span class="price-amount">$0</span>
-                    <span style="color: var(--text-muted);">/mo</span>
+                    <span class="price-period">/mo</span>
                 </div>
             </div>
             <ul class="plan-features">
@@ -25,7 +24,7 @@
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
                     </svg>
-                    View deals 3+ days old
+                    Deals delayed 3+ days
                 </li>
                 <li>
                     <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
@@ -33,7 +32,7 @@
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
                     </svg>
-                    Basic filters
+                    Basic filters only
                 </li>
                 <li>
                     <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
@@ -43,10 +42,18 @@
                     </svg>
                     Save up to 5 deals
                 </li>
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    No email alerts
+                </li>
             </ul>
             <div class="plan-action">
                 {% if not user %}
-                <a href="/auth/register" class="btn btn-secondary btn-block">Sign Up</a>
+                <a href="/auth/register" class="btn btn-secondary btn-block">Sign Up Free</a>
                 {% elif subscription and subscription.plan.value == 'free' %}
                 <button class="btn btn-secondary btn-block" disabled>Current Plan</button>
                 {% endif %}
@@ -57,10 +64,10 @@
         <div class="pricing-card featured">
             <div class="featured-badge">Most Popular</div>
             <div class="plan-header">
-                <h2 class="plan-name" style="color: var(--accent-blue);">Pro Access</h2>
+                <h2 class="plan-name plan-name--pro">Pro Access</h2>
                 <div class="plan-price">
                     <span class="price-amount">$50</span>
-                    <span style="color: var(--text-muted);">/mo</span>
+                    <span class="price-period">/mo</span>
                 </div>
             </div>
             <ul class="plan-features">
@@ -88,12 +95,17 @@
                     </svg>
                     Unlimited saved deals
                 </li>
-
+                <li>
+                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Excel export for store runs
+                </li>
             </ul>
-            <p
-                style="font-size: 0.85rem; color: var(--text-secondary); margin: 1rem 0 0 0; padding: 0.75rem; background: rgba(0,0,0,0.05); border-radius: var(--radius-md);">
-                Don't see a store near you? <a href="mailto:stores@gloorbot.com"
-                    style="color: var(--accent-blue);">Email us</a> and we'll look into adding it!
+            <p class="plan-note">
+                Don't see a store near you? <a href="mailto:stores@gloorbot.com">Email us</a> and we'll add it!
             </p>
             <div class="plan-action">
                 {% if not user %}
@@ -110,18 +122,17 @@
         </div>
 
         <!-- Premium Tier -->
-        <div class="pricing-card" style="border: 2px solid var(--accent-gold, #d4af37);">
+        <div class="pricing-card pricing-card--premium">
             <div class="plan-header">
-                <h2 class="plan-name" style="color: var(--accent-gold, #d4af37);">Premium</h2>
+                <h2 class="plan-name" style="color: var(--accent-gold);">Premium</h2>
                 <div class="plan-price">
                     <span class="price-amount">$200</span>
-                    <span style="color: var(--text-muted);">/mo</span>
+                    <span class="price-period">/mo</span>
                 </div>
             </div>
             <ul class="plan-features">
                 <li>
-                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                        style="color: var(--accent-gold, #d4af37);">
+                    <svg class="feature-check" style="color: var(--accent-gold);" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd"
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
@@ -129,8 +140,7 @@
                     <strong>Everything in Pro</strong>
                 </li>
                 <li>
-                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                        style="color: var(--accent-gold, #d4af37);">
+                    <svg class="feature-check" style="color: var(--accent-gold);" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd"
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
@@ -138,8 +148,7 @@
                     <strong>Unlimited deal alerts included</strong>
                 </li>
                 <li>
-                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                        style="color: var(--accent-gold, #d4af37);">
+                    <svg class="feature-check" style="color: var(--accent-gold);" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd"
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
@@ -147,8 +156,7 @@
                     Priority email support (24hr)
                 </li>
                 <li>
-                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                        style="color: var(--accent-gold, #d4af37);">
+                    <svg class="feature-check" style="color: var(--accent-gold);" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd"
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
@@ -156,8 +164,7 @@
                     Request new stores anytime
                 </li>
                 <li>
-                    <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                        style="color: var(--accent-gold, #d4af37);">
+                    <svg class="feature-check" style="color: var(--accent-gold);" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd"
                             d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
                             clip-rule="evenodd" />
@@ -167,111 +174,83 @@
             </ul>
             <div class="plan-action">
                 {% if not user %}
-                <a href="/auth/register" class="btn btn-block"
-                    style="background: linear-gradient(135deg, #d4af37, #b8860b); color: #1a1f2e; font-weight: 700;">Go
-                    Premium</a>
-                {% elif subscription and (subscription.plan.value == 'premium' or subscription.plan.value ==
-                'enterprise') %}
-                <button class="btn btn-block" style="background: var(--accent-gold, #d4af37); color: #1a1f2e;"
-                    disabled>Current Plan</button>
+                <a href="/auth/register" class="btn btn-gold btn-block">Go Premium</a>
+                {% elif subscription and (subscription.plan.value == 'premium' or subscription.plan.value == 'enterprise') %}
+                <button class="btn btn-gold btn-block" disabled>Current Plan</button>
                 {% else %}
                 <form method="post" action="/auth/checkout">
                     <input type="hidden" name="plan" value="premium">
-                    <button type="submit" class="btn btn-block"
-                        style="background: linear-gradient(135deg, #d4af37, #b8860b); color: #1a1f2e; font-weight: 700;">Go
-                        Premium</button>
+                    <button type="submit" class="btn btn-gold btn-block">Go Premium</button>
                 </form>
                 {% endif %}
             </div>
         </div>
     </div>
 
-    <!-- Promo Banners Section -->
-    <div
-        style="display: flex; gap: 2rem; max-width: 900px; margin: 3rem auto; flex-wrap: wrap; justify-content: center;">
-        <!-- Deals Go Fast Banner -->
-        <div
-            style="flex: 1; min-width: 300px; background: linear-gradient(145deg, #1a1f2e, #252b3d); padding: 2rem; border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; justify-content: center;">
-            <h3 style="color: #fff; font-family: var(--font-display); font-size: 1.5rem; margin-bottom: 1rem;">⚡ Deals
-                go fast...</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">Don't let the best
-                clearance finds slip away. Pro members see new deals instantly, while free users wait 3 days.</p>
+    <!-- Promo Cards -->
+    <div style="display: flex; gap: 1.5rem; max-width: 900px; margin: 2.5rem auto; flex-wrap: wrap; justify-content: center;">
+        <div class="promo-card">
+            <h3>Deals go fast</h3>
+            <p>Pro members see new deals instantly, while free users wait 3 days. Don't let the best clearance finds slip away.</p>
             <button onclick="document.querySelector('.pricing-card.featured .btn').click()" class="btn btn-primary"
                 style="align-self: flex-start;">Go Pro Today</button>
         </div>
-
-        <!-- Email Alerts Banner -->
-        <div
-            style="flex: 1; min-width: 300px; background: linear-gradient(145deg, #1a1f2e, #252b3d); padding: 2rem; border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; justify-content: center;">
-            <h3 style="color: #fff; font-family: var(--font-display); font-size: 1.5rem; margin-bottom: 1rem;">📨 Get
-                Notified</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">Stop refreshing the page.
-                Set up custom email alerts and we'll ping you the second a deal matches your criteria.</p>
+        <div class="promo-card">
+            <h3>Get Notified</h3>
+            <p>Stop refreshing the page. Set up custom email alerts and we'll notify you the second a deal matches your criteria.</p>
             <a href="/notifications" class="btn btn-secondary" style="align-self: flex-start;">Setup Alerts</a>
         </div>
     </div>
 
-    <!-- Deal Alerts Add-on Section -->
-    <div
-        style="max-width: 600px; margin: 3rem auto; padding: 2rem; background: linear-gradient(145deg, #1a1f2e, #252b3d); border-radius: var(--radius-lg); text-align: center;">
-        <h2 style="font-family: var(--font-display); font-size: 1.5rem; margin-bottom: 1rem; color: #fff;">Deal Alerts
-        </h2>
+    <!-- Deal Alerts Add-on -->
+    <div class="addon-card">
+        <h2>Deal Alerts Add-on</h2>
         <div class="plan-price" style="margin-bottom: 1rem;">
-            <span class="price-amount" style="font-size: 2rem; color: #10b981;">$10</span>
-            <span style="color: var(--text-muted);">/month per alert</span>
+            <span class="price-amount" style="font-size: 2rem; color: var(--success);">$10</span>
+            <span class="price-period">/month per alert</span>
         </div>
-        <ul style="list-style: none; padding: 0; text-align: left; max-width: 300px; margin: 0 auto 1.5rem;">
-            <li style="color: #a8b5c8; padding: 0.5rem 0;">
-                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                    style="width: 16px; height: 16px; vertical-align: middle; margin-right: 8px; color: #10b981;">
-                    <path fill-rule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clip-rule="evenodd" />
+        <ul class="addon-feature-list">
+            <li>
+                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;color:var(--success);flex-shrink:0;">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                 </svg>
                 Instant email notifications
             </li>
-            <li style="color: #a8b5c8; padding: 0.5rem 0;">
-                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                    style="width: 16px; height: 16px; vertical-align: middle; margin-right: 8px; color: #10b981;">
-                    <path fill-rule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clip-rule="evenodd" />
+            <li>
+                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;color:var(--success);flex-shrink:0;">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                 </svg>
                 Category or keyword matching
             </li>
-            <li style="color: #a8b5c8; padding: 0.5rem 0;">
-                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor"
-                    style="width: 16px; height: 16px; vertical-align: middle; margin-right: 8px; color: #10b981;">
-                    <path fill-rule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clip-rule="evenodd" />
+            <li>
+                <svg class="feature-check" viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;color:var(--success);flex-shrink:0;">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                 </svg>
                 Discount & state filters
             </li>
         </ul>
-        <p style="color: #6b7a8f; font-size: 0.9rem; margin-bottom: 1.5rem;">
-            <strong style="color: #d4af37;">Premium members:</strong> Unlimited alerts included!
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+            <strong style="color: var(--accent-gold);">Premium members:</strong> Unlimited alerts included!
         </p>
         <a href="/notifications" class="btn btn-secondary">Manage Alerts</a>
     </div>
 
     <!-- Why Upgrade Section -->
-    <div
-        style="max-width: 800px; margin: 0 auto; padding: 3rem; background: #ffffff; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); text-align: center;">
-        <h2 style="font-family: var(--font-display); font-size: 2rem; margin-bottom: 2rem;">Why go Pro?</h2>
-        <div
-            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; text-align: left;">
+    <div class="why-section">
+        <h2>Why go Pro?</h2>
+        <div class="why-grid">
             <div>
-                <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">Get Fresh Deals</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary);">Access the newest clearance items as soon as
-                    they're listed. Free users only see deals that are 3+ days old.</p>
+                <h3>Get Fresh Deals</h3>
+                <p>Access the newest clearance items as soon as they're listed. Free users only see deals that are 3+ days old.</p>
             </div>
             <div>
-                <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">Unlimited Lists</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary);">Planning a store run? Save as many deals as
-                    you need. Build the ultimate shopping list.</p>
+                <h3>Unlimited Lists</h3>
+                <p>Planning a store run? Save as many deals as you need. Build the ultimate shopping list.</p>
             </div>
-
+            <div>
+                <h3>Never Miss a Deal</h3>
+                <p>Set up email alerts by category, keyword, or discount threshold. Get notified the moment something matches.</p>
+            </div>
         </div>
     </div>
 </section>

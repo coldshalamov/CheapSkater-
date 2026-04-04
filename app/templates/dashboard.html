@@ -119,29 +119,21 @@
     </div>
   </form>
 
-  <div class="info-banner info-banner--sort">
-    <svg class="info-banner-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3a1 1 0 000 2h11a1 1 0 100-2H3zM3 7a1 1 0 000 2h7a1 1 0 100-2H3zM3 11a1 1 0 100 2h4a1 1 0 100-2H3zM15 8a1 1 0 10-2 0v5.586l-1.293-1.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L15 13.586V8z"/></svg>
-    <span><strong>Sorting:</strong> Newest items are shown first.{% if is_pro %} As a Pro member, up-to-the-minute results
-    are posted instantly to the top of the page.{% endif %}</span>
-  </div>
-
   {% if not is_pro %}
-  <div class="info-banner info-banner--upsell">
-    <svg class="info-banner-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
-    <span><strong>Deals this cheap go fast!</strong> <a href="/auth/pricing">Sign up for Pro</a> to see up-to-the-minute
-    listings, or set up <a href="/notifications/">Email Alerts</a> to get notified the minute
-    an item goes on sale!</span>
+  <div class="info-banner info-banner--upsell" id="upsell-banner">
+    <span><strong>Deals go fast!</strong> <a href="/auth/pricing">Upgrade to Pro</a> for real-time listings, or set up <a href="/notifications/">Email Alerts</a>.</span>
+    <button type="button" onclick="this.parentElement.style.display='none';localStorage.setItem('hide_upsell','1')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:1.1rem;padding:4px 8px;margin-left:auto;opacity:0.6;">&times;</button>
   </div>
+  <script>if(localStorage.getItem('hide_upsell')==='1'){var b=document.getElementById('upsell-banner');if(b)b.style.display='none';}</script>
   {% endif %}
 
-  <div class="info-banner info-banner--tip">
-    <svg class="info-banner-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
-    <span><strong>Pro Tip:</strong> Click <em>Save deal</em> to build a pickup list, then view them in <a href="/cheapskater">Saved Deals</a>.</span>
+  <div class="quick-filters">
+    <span class="quick-filters__label">Quick:</span>
+    <button type="button" class="quick-filter-chip" data-discount="75">75%+ Off</button>
+    <button type="button" class="quick-filter-chip" data-price-max="10">Under $10</button>
+    <button type="button" class="quick-filter-chip" data-price-max="25">Under $25</button>
+    <button type="button" class="quick-filter-chip" data-price-max="50">Under $50</button>
   </div>
-
-  <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
-    Last updated: {{ format_regional_full_timestamp(last_updated, region) if last_updated else 'No observations yet' }}
-  </p>
 
   <div id="cards-grid" class="deals-grid">
     <!-- Cards will be rendered here by JavaScript or server-side loop -->
@@ -208,7 +200,7 @@
           {% set primary_store = group.stores[0] %}
           <!-- Primary Store -->
           <div class="store-card primary" data-store-name="{{ primary_store.store_label }}"
-            onclick="copyStoreFromElement(this)">
+            role="button" tabindex="0" onclick="copyStoreFromElement(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyStoreFromElement(this);}">
             <div class="store-card-content">
               <div class="store-name-row">
               <span class="icon icon--md" style="color: var(--accent-blue);">
@@ -242,7 +234,7 @@
             <div class="stores-list-scroll">
               {% for store in group.stores[1:] %}
               <div class="store-card secondary" data-store-name="{{ store.store_label }}"
-                onclick="copyStoreFromElement(this)">
+                role="button" tabindex="0" onclick="copyStoreFromElement(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyStoreFromElement(this);}">
                 <div class="store-card-content">
                   <div class="store-name-row">
                     <span class="store-name">{{ store.store_label }}</span>
@@ -313,7 +305,7 @@
   </div>
 </div>
 
-<div class="toast-container" id="toast-container"></div>
+<div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -615,5 +607,33 @@
       });
     }, 3000);
   }
+
+  // Quick-filter chips
+  (function() {
+    const form = document.querySelector('.filters-bar');
+    if (!form) return;
+    document.querySelectorAll('.quick-filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const discount = chip.dataset.discount;
+        const priceMax = chip.dataset.priceMax;
+        if (discount) {
+          const discountSelect = document.getElementById('discount_filter');
+          if (discountSelect) {
+            // Set to custom and fill min
+            discountSelect.value = 'custom';
+            const minInput = document.getElementById('discount_min');
+            const maxInput = document.getElementById('discount_max');
+            if (minInput) minInput.value = discount;
+            if (maxInput) maxInput.value = '100';
+          }
+        }
+        if (priceMax) {
+          const nowMax = document.getElementById('price_now_max');
+          if (nowMax) nowMax.value = priceMax;
+        }
+        form.submit();
+      });
+    });
+  })();
 </script>
 {% endblock %}

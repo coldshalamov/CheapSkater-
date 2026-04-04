@@ -19,10 +19,10 @@
 </head>
 
 <body>
+    <a href="#main-content" class="skip-to-content">Skip to content</a>
     <header class="site-header">
         <div class="container">
             <a href="/" class="brand-link">
-                <!-- Retaining the image source as requested only branding change -->
                 <img src="{{ url_for('static', path='img/gloorbot.png') }}" alt="Lowebot logo" class="brand-logo">
                 <span class="brand-name">Lowebot</span>
             </a>
@@ -47,7 +47,7 @@
         </div>
     </header>
 
-    <main class="site-main">
+    <main class="site-main" id="main-content">
         <div class="container">
             {% block content %}{% endblock %}
         </div>
