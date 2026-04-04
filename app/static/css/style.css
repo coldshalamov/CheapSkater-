@@ -1,20 +1,38 @@
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background-color: var(--text-muted);
+    border-radius: 20px;
+    border: 2px solid var(--bg-primary);
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-secondary);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    GLOORBOT - "Playful Tech" Redesign
    Vibrant Blue, Rounded & Friendly, Glassmorphism
    ═══════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fredoka:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
     /* Core Colors */
     --bg-primary: #ffffff;
-    --bg-secondary: #f0f4f8;
+    --bg-secondary: #f8fafc;
     /* Softer blue-grey */
-    --accent-blue: #2563EB;
+    --accent-blue: #4f46e5;
     /* Vibrant Blue */
-    --accent-blue-dark: #1E40AF;
-    --accent-blue-light: #60A5FA;
-    --accent-blue-soft: rgba(37, 99, 235, 0.12);
+    --accent-blue-dark: #3730a3;
+    --accent-blue-light: #818cf8;
+    --accent-blue-soft: rgba(79, 70, 229, 0.12);
 
     /* Functional Colors */
     --success: #10B981;
@@ -31,28 +49,48 @@
 
     /* Effects */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.03);
 
     --card-bg: rgba(255, 255, 255, 0.9);
     --card-border: 1px solid rgba(255, 255, 255, 0.5);
     --glass-blur: blur(12px);
 
     /* Typography */
-    --font-heading: 'Fredoka', system-ui, sans-serif;
+    --font-heading: 'Inter', system-ui, sans-serif;
     /* Playful headers */
-    --font-body: 'Nunito', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
     /* Friendly body text */
 
     /* Spacing */
     --container-max: 1200px;
     --header-height: 80px;
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
-    --radius-pill: 9999px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --radius-pill: 6px;
+
+    /* Spacing */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-12: 48px;
+
+    /* Text Scale */
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 1.875rem;
+    --text-4xl: 2.25rem;
+
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -68,7 +106,7 @@ body {
     font-family: var(--font-body);
     background-color: var(--bg-secondary);
     /* Hero Gradient Background */
-    background-image: url('../img/hero-gradient.png');
+    /* background-image: url('../img/hero-gradient.png'); */
     background-size: cover;
     background-attachment: fixed;
     background-position: center;
@@ -92,7 +130,7 @@ a {
     color: var(--accent-blue);
     text-decoration: none;
     font-weight: 700;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 a:hover {
@@ -111,13 +149,12 @@ button {
 
 .site-header {
     height: var(--header-height);
-    background: linear-gradient(135deg, var(--accent-blue-dark) 0%, var(--accent-blue) 100%);
-    color: white;
+    background: #ffffff; color: var(--text-primary); border-bottom: 1px solid #e2e8f0;
     position: relative;
     z-index: 100;
     box-shadow: var(--shadow-md);
     /* Soft curve at bottom */
-    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    border-radius: 0;
 }
 
 /* The Wave Pattern Overlay (generated image) */
@@ -125,11 +162,11 @@ button {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: url('../img/header-pattern.png');
+    /* background-image: url('../img/header-pattern.png'); */
     background-size: cover;
     opacity: 0.15;
     mix-blend-mode: overlay;
-    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    border-radius: 0;
     pointer-events: none;
 }
 
@@ -148,63 +185,47 @@ button {
 /* THE PEEKING LOGO */
 .brand-link {
     display: flex;
+    align-items: center;
     /* Kept for semantics, but image is absolute */
 }
 
-.brand-logo {
-    position: absolute;
-    top: 10px;
-    /* Slight offset from top */
-    left: 24px;
-    height: 110px;
-    /* Big! 15% larger as requested */
-    width: 110px;
-    object-fit: contain;
-    background: white;
-    border-radius: 50%;
-    box-shadow: var(--shadow-lg);
-    z-index: 50;
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+.brand-logo { position: relative; top: 0; left: 0; height: 36px; width: 36px; object-fit: contain; margin-right: 12px; box-shadow: none; }
 
 .brand-logo:hover {
     transform: scale(1.05) rotate(5deg);
 }
 
-.brand-name {
-    display: none;
-    /* Hide text, logo is iconic enough */
-}
+.brand-name { display: block; font-weight: 700; font-size: 1.25rem; color: var(--text-primary); }
 
 /* Navigation */
 .nav-links {
     display: flex;
     gap: 8px;
     /* Tight gap for pill buttons */
-    margin-left: 120px;
+    margin-left: auto;
     /* Make room for the big logo */
     z-index: 20;
     /* Above pattern */
 }
 
 .nav-link {
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--text-secondary);
     padding: 8px 16px;
     border-radius: var(--radius-pill);
     font-weight: 600;
     font-size: 0.95rem;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .nav-link:hover {
-    background: rgba(255, 255, 255, 0.15);
-    color: white;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .nav-link.active {
-    background: white;
+    background: var(--accent-blue-soft);
     color: var(--accent-blue);
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
 }
 
 /* Mobile Nav Adjustments - Basic fallback (overridden by more specific rules below) */
@@ -212,7 +233,7 @@ button {
     .site-header {
         height: auto;
         padding: 12px 0;
-        border-radius: 0 0 16px 16px;
+        border-radius: 0;
     }
 }
 
@@ -255,7 +276,7 @@ button {
 }
 
 .btn:active {
-    transform: translateY(1px);
+    transform: scale(0.97);
 }
 
 .btn-primary {
@@ -295,20 +316,21 @@ button {
 
 .card {
     background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: var(--glass-blur);
-    border: 1px solid white;
+    /* backdrop-filter: var(--glass-blur); */
+    border: 1px solid #e2e8f0;
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-md);
     overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
     position: relative;
     display: flex;
     flex-direction: column;
 }
 
 .card:hover {
-    transform: translateY(-6px);
-    box-shadow: var(--shadow-xl);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px -10px var(--accent-blue-soft), 0 4px 10px -4px rgba(0, 0, 0, 0.05);
+    border-color: rgba(79, 70, 229, 0.2);
 }
 
 /* Card Image Area */
@@ -327,6 +349,7 @@ button {
 
 .deal-card__image img {
     max-width: 100%;
+    mix-blend-mode: multiply;
     max-height: 100%;
     object-fit: contain;
     transition: transform 0.3s ease;
@@ -341,14 +364,18 @@ button {
     position: absolute;
     top: 16px;
     right: 16px;
-    background: var(--danger);
+    background: linear-gradient(135deg, #FF416C 0%, #FF4B2B 100%);
     color: white;
     font-family: var(--font-heading);
     font-weight: 700;
     padding: 4px 12px;
     border-radius: var(--radius-pill);
     font-size: 0.85rem;
-    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 4px 12px rgba(255, 75, 43, 0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    backdrop-filter: blur(4px);
+    letter-spacing: 0.5px;
+    z-index: 10;
 }
 
 /* Card Body */
@@ -371,7 +398,7 @@ button {
     text-transform: uppercase;
     margin-bottom: 8px;
     border: none;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .category-chip:hover {
@@ -388,7 +415,7 @@ button {
     line-height: 1.3;
     /* Tighter line height for multi-line titles */
     display: -webkit-box;
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 2;
     /* Allow up to 4 lines before truncating */
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -412,6 +439,7 @@ button {
 
 .deal-card__price {
     font-size: 1.75rem;
+    letter-spacing: -0.04em;
     font-weight: 800;
     color: var(--accent-blue-dark);
     font-family: var(--font-heading);
@@ -419,9 +447,22 @@ button {
 }
 
 .deal-card__was-price {
-    text-decoration: line-through;
+    position: relative;
+    text-decoration: none;
     color: var(--text-muted);
     font-weight: 600;
+}
+.deal-card__was-price::after {
+    content: '';
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    top: 50%;
+    height: 2px;
+    background: var(--danger);
+    transform: rotate(-8deg);
+    border-radius: 2px;
+    opacity: 0.7;
 }
 
 /* Card Footer */
@@ -472,7 +513,7 @@ input[type="search"] {
     font-family: var(--font-body);
     font-weight: 600;
     color: var(--text-primary);
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     min-width: 140px;
 }
 
@@ -568,7 +609,7 @@ input[type="search"]:focus {
     border-radius: var(--radius-md);
     padding: 10px 14px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
 }
@@ -691,7 +732,7 @@ input[type="search"]:focus {
     display: flex;
     align-items: center;
     gap: 4px;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-toggle-stores:hover {
@@ -818,7 +859,7 @@ input[type="search"]:focus {
 .pricing-card {
     background: rgba(255, 255, 255, 0.9);
     backdrop-filter: blur(10px);
-    border: 1px solid white;
+    border: 1px solid #e2e8f0;
     border-radius: var(--radius-xl);
     padding: 32px;
     box-shadow: var(--shadow-lg);
@@ -969,15 +1010,7 @@ input[type="search"]:focus {
         width: auto;
     }
 
-    .brand-logo {
-        position: relative;
-        top: 0;
-        left: 0;
-        height: 50px;
-        width: 50px;
-        margin: 0;
-        flex-shrink: 0;
-    }
+    .brand-logo { position: relative; top: 0; left: 0; height: 36px; width: 36px; object-fit: contain; margin-right: 12px; box-shadow: none; }
 
     /* Navigation: scrollable but hidden scrollbar, no overflow visible */
     .nav-links {
