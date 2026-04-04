@@ -1864,25 +1864,48 @@ def _render_dashboard(
 
 @app.get("/healthz")
 def healthcheck() -> dict[str, Any]:
-    """Return health along with the age of the latest ZIP heartbeat."""
+    """Return basic service health and (optionally) ZIP heartbeat age."""
+
+    strict = os.getenv("CHEAPSKATER_HEALTH_STRICT", "0") == "1"
 
     payload = _read_json(ZIP_CURSOR_FILE)
     ts_text = payload.get("timestamp") if isinstance(payload, dict) else None
     if not ts_text:
-        raise HTTPException(status_code=503, detail="zip cursor missing")
+        if strict:
+            raise HTTPException(status_code=503, detail="zip cursor missing")
+        return {"status": "ok", "cursor_status": "missing", "age_minutes": None}
     try:
         stamp = datetime.fromisoformat(ts_text)
     except Exception as exc:
-        raise HTTPException(
-            status_code=503, detail=f"cursor parse error: {exc}"
-        ) from exc
+        if strict:
+            raise HTTPException(
+                status_code=503, detail=f"cursor parse error: {exc}"
+            ) from exc
+        return {
+            "status": "ok",
+            "cursor_status": "error",
+            "age_minutes": None,
+            "detail": f"cursor parse error: {exc}",
+        }
     age_minutes = (datetime.now(timezone.utc) - stamp).total_seconds() / 60.0
     if HEALTH_MAX_STALE_MINUTES > 0 and age_minutes > HEALTH_MAX_STALE_MINUTES:
-        raise HTTPException(
-            status_code=503,
-            detail=f"stale cursor ({age_minutes:.1f}m > {HEALTH_MAX_STALE_MINUTES}m)",
-        )
-    return {"status": "ok", "age_minutes": age_minutes}
+        if strict:
+            raise HTTPException(
+                status_code=503,
+                detail=f"stale cursor ({age_minutes:.1f}m > {HEALTH_MAX_STALE_MINUTES}m)",
+            )
+        return {
+            "status": "ok",
+            "cursor_status": "stale",
+            "age_minutes": age_minutes,
+            "max_stale_minutes": HEALTH_MAX_STALE_MINUTES,
+        }
+    return {
+        "status": "ok",
+        "cursor_status": "ok",
+        "age_minutes": age_minutes,
+        "max_stale_minutes": HEALTH_MAX_STALE_MINUTES,
+    }
 
 
 @app.get("/metrics")
