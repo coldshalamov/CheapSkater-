@@ -77,6 +77,10 @@
         const cartStores = document.getElementById('cart-stores');
         const summaryCountEls = document.querySelectorAll('[data-cart-count]');
         const summaryTotalEls = document.querySelectorAll('[data-cart-total]');
+        const cssEscape =
+            (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+                ? CSS.escape
+                : (value) => String(value).replace(/([ !"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
 
         function formatCurrency(value) {
             const formatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -92,7 +96,7 @@
             if (!cartStores) {
                 return null;
             }
-            return cartStores.querySelector(`[data-deal-id="${CSS.escape(dealId)}"]`);
+            return cartStores.querySelector(`[data-deal-id="${cssEscape(dealId)}"]`);
         }
 
         function removeCartRow(dealId, storeNumber) {

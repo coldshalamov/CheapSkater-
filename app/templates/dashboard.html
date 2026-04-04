@@ -65,25 +65,32 @@
         <option value="{{ value }}" {% if filters.discount_choice==value %} selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
+      <div id="discount-custom-range" style="display: {% if filters.discount_choice == 'custom' %}flex{% else %}none{% endif %}; gap: 0.5rem; align-items: center; margin-top: 0.35rem;">
+        <input type="number" id="discount_min" name="discount_min" placeholder="Min %"
+          value="{{ '' if filters.discount_min_pct is none else filters.discount_min_pct }}" min="0" max="100" step="0.1" style="width: 90px;" class="form-input">
+        <span style="color: var(--text-muted);">-</span>
+        <input type="number" id="discount_max" name="discount_max" placeholder="Max %"
+          value="{{ '' if filters.discount_max_pct is none else filters.discount_max_pct }}" min="0" max="100" step="0.1" style="width: 90px;" class="form-input">
+      </div>
     </div>
     <div class="filter-group">
       <label for="price_was_min" class="form-label">Was Price ($)</label>
       <div style="display: flex; gap: 0.5rem; align-items: center;">
         <input type="number" id="price_was_min" name="price_was_min" placeholder="Min"
-          value="{{ filters.price_was_min or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+          value="{{ '' if filters.price_was_min is none else filters.price_was_min }}" min="0" step="0.01" style="width: 90px;" class="form-input">
         <span style="color: var(--text-muted);">-</span>
         <input type="number" id="price_was_max" name="price_was_max" placeholder="Max"
-          value="{{ filters.price_was_max or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+          value="{{ '' if filters.price_was_max is none else filters.price_was_max }}" min="0" step="0.01" style="width: 90px;" class="form-input">
       </div>
     </div>
     <div class="filter-group">
       <label for="price_now_min" class="form-label">Now Price ($)</label>
       <div style="display: flex; gap: 0.5rem; align-items: center;">
         <input type="number" id="price_now_min" name="price_now_min" placeholder="Min"
-          value="{{ filters.price_now_min or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+          value="{{ '' if filters.price_now_min is none else filters.price_now_min }}" min="0" step="0.01" style="width: 90px;" class="form-input">
         <span style="color: var(--text-muted);">-</span>
         <input type="number" id="price_now_max" name="price_now_max" placeholder="Max"
-          value="{{ filters.price_now_max or '' }}" min="0" step="0.01" style="width: 90px;" class="form-input">
+          value="{{ '' if filters.price_now_max is none else filters.price_now_max }}" min="0" step="0.01" style="width: 90px;" class="form-input">
       </div>
     </div>
     <div class="filter-group search-field" style="flex: 1; min-width: 200px;">
@@ -193,7 +200,7 @@
                 <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
                   <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ primary_store.history_id }}</span>
                   <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
-                    onclick="event.stopPropagation(); adminDeleteDeal('{{ primary_store.history_id }}');">Delete</button>
+                    onclick="adminDeleteDeal('{{ primary_store.history_id }}', event);">Delete</button>
                 </span>
                 {% endif %}
               </div>
@@ -221,7 +228,7 @@
                     <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;">
                       <span style="font-size: 0.75rem; color: var(--text-muted);">id {{ store.history_id }}</span>
                       <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
-                        onclick="event.stopPropagation(); adminDeleteDeal('{{ store.history_id }}');">Delete</button>
+                        onclick="adminDeleteDeal('{{ store.history_id }}', event);">Delete</button>
                     </span>
                     {% endif %}
                   </div>
@@ -285,6 +292,22 @@
 {% block extra_scripts %}
 <script>
   (function () {
+    const discountSelect = document.getElementById('discount_filter');
+    const discountRange = document.getElementById('discount-custom-range');
+    const discountMin = document.getElementById('discount_min');
+    const discountMax = document.getElementById('discount_max');
+
+    function syncDiscountRange() {
+      if (!discountSelect || !discountRange) return;
+      const isCustom = discountSelect.value === 'custom';
+      discountRange.style.display = isCustom ? 'flex' : 'none';
+      if (discountMin) discountMin.disabled = !isCustom;
+      if (discountMax) discountMax.disabled = !isCustom;
+    }
+
+    discountSelect?.addEventListener('change', syncDiscountRange);
+    syncDiscountRange();
+
     const form = document.querySelector('.filters-bar');
     const categorySelect = document.getElementById('category');
     if (!form || !categorySelect) return;
@@ -372,24 +395,59 @@
       .replace(/\s+/g, ' ')
       .trim();
 
-    navigator.clipboard.writeText(clipboardText).then(() => {
-      // Store the product URL for the "Next" button
-      currentProductUrl = productUrl;
-      currentStoreName = clipboardText;
+    function legacyCopy(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      textarea.remove();
+      if (!ok) {
+        throw new Error('copy failed');
+      }
+    }
 
-      // Update modal content
-      document.getElementById('modalStoreName').textContent = clipboardText + ' copied!';
+    const doCopy = () => {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(clipboardText);
+      }
+      return Promise.resolve().then(() => legacyCopy(clipboardText));
+    };
 
-      // Show the modal
-      document.getElementById('storeModal').classList.add('show');
-    }).catch(err => {
-      console.error('Failed to copy text: ', err);
-      showToast('Error', 'Could not copy store name.');
-    });
+    doCopy()
+      .then(() => {
+        // Store the product URL for the "Next" button
+        currentProductUrl = productUrl;
+        currentStoreName = clipboardText;
+
+        // Update modal content
+        const modalStoreName = document.getElementById('modalStoreName');
+        if (modalStoreName) {
+          modalStoreName.textContent = clipboardText + ' copied!';
+        }
+
+        // Show the modal
+        const storeModal = document.getElementById('storeModal');
+        if (storeModal) {
+          storeModal.classList.add('show');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to copy text: ', err);
+        showToast('Error', 'Could not copy store name.');
+      });
   }
 
   function closeStoreModal() {
-    document.getElementById('storeModal').classList.remove('show');
+    const storeModal = document.getElementById('storeModal');
+    if (storeModal) {
+      storeModal.classList.remove('show');
+    }
     currentProductUrl = null;
     currentStoreName = null;
   }
@@ -402,7 +460,7 @@
   }
 
   // Close modal when clicking outside
-  document.getElementById('storeModal').addEventListener('click', function (e) {
+  document.getElementById('storeModal')?.addEventListener('click', function (e) {
     if (e.target === this) {
       closeStoreModal();
     }
@@ -415,7 +473,10 @@
     }
   });
 
-  async function adminDeleteDeal(historyId) {
+  async function adminDeleteDeal(historyId, event) {
+    if (event && typeof event.stopPropagation === 'function') {
+      event.stopPropagation();
+    }
     const idText = String(historyId || '').trim();
     if (!idText) return;
 

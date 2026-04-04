@@ -35,23 +35,6 @@ source .venv/bin/activate
 python -m uvicorn app.dashboard:app --host 0.0.0.0 --port 9000 --reload
 ```
 
-## ❌ DO NOT USE These Files
-
-The following files are **LEGACY SCRAPER LAUNCHERS** and should NOT be used:
-
-- `quarantine/legacy_scraper/launchers/launch.bat` ❌
-- `quarantine/legacy_scraper/launchers/launch.sh` ❌
-- `quarantine/legacy_scraper/launchers/launcher.bat` ❌
-- `quarantine/legacy_scraper/launchers/launcher_gui.py` ❌
-
-These old launchers will try to:
-- Install Playwright
-- Run scraper commands
-- Create catalog files
-- Set scraper environment variables
-
-**None of this is needed for the frontend site!**
-
 ## What This Site Does
 
 This is a **FastAPI web application** that:

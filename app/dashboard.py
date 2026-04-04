@@ -525,6 +525,55 @@ def _prepare_listings(listings: Iterable[dict[str, Any]]) -> list[dict[str, Any]
     return [_prepare_listing(listing) for listing in listings]
 
 
+def _coerce_discount_fraction(value: Any) -> float | None:
+    """Return a 0..1 discount fraction from either a fraction or percent input."""
+
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return 0.0
+    if parsed > 1:
+        parsed = parsed / 100.0
+    if parsed < 0:
+        return 0.0
+    if parsed > 1:
+        return 1.0
+    return parsed
+
+
+def _effective_discount_fraction(listing: dict[str, Any]) -> float | None:
+    """Best-effort discount fraction (0..1) for filtering.
+
+    Production data can have pct_off stored as either a fraction (0..1) or a percent
+    (0..100). Prefer recalculating from price/price_was when possible, otherwise
+    normalize the stored pct_off.
+    """
+
+    price = listing.get("price")
+    price_was = listing.get("price_was")
+    try:
+        price_value = float(price) if price is not None else None
+        price_was_value = float(price_was) if price_was is not None else None
+    except (TypeError, ValueError):
+        price_value = None
+        price_was_value = None
+
+    if (
+        price_value is not None
+        and price_was_value is not None
+        and price_value > 0
+        and price_was_value > 0
+        and price_value < price_was_value
+    ):
+        return max(0.0, min(1.0, (price_was_value - price_value) / price_was_value))
+
+    return _coerce_discount_fraction(listing.get("pct_off"))
+
+
 def _apply_filters(
     listings: Iterable[dict[str, Any]],
     *,
@@ -532,6 +581,7 @@ def _apply_filters(
 ) -> list[dict[str, Any]]:
     cutoff = filters.get("time_cutoff")
     discount_min = filters.get("discount_min")
+    discount_max = filters.get("discount_max")
     stock_min = filters.get("stock_min")
     stock_max = filters.get("stock_max")
     price_was_min = filters.get("price_was_min")
@@ -539,6 +589,8 @@ def _apply_filters(
     price_now_min = filters.get("price_now_min")
     price_now_max = filters.get("price_now_max")
     search_query = filters.get("search_query")
+    query_lower = (search_query or "").lower().strip() if search_query else ""
+    query_digits = "".join(ch for ch in query_lower if ch.isdigit()) if query_lower else ""
 
     result: list[dict[str, Any]] = []
     for listing in listings:
@@ -546,9 +598,13 @@ def _apply_filters(
         added_dt = _coerce_datetime(added_at)
         if cutoff and (added_dt is None or added_dt < cutoff):
             continue
-        pct_off = listing.get("pct_off")
-        if discount_min is not None:
-            if pct_off is None or pct_off < discount_min:
+        if discount_min is not None or discount_max is not None:
+            pct_off = _effective_discount_fraction(listing)
+            if pct_off is None:
+                continue
+            if discount_min is not None and pct_off < discount_min:
+                continue
+            if discount_max is not None and pct_off > discount_max:
                 continue
         stock_estimate = listing.get("stock_estimate")
         if stock_min is not None:
@@ -577,20 +633,33 @@ def _apply_filters(
                 continue
 
         # Filter by search query (item name, store name, or SKU)
-        if search_query:
-            query_lower = search_query.lower().strip()
-            if query_lower:
-                title = (listing.get("title") or "").lower()
-                sku = (listing.get("sku") or "").lower()
-                store_name = (listing.get("store_name") or "").lower()
-                store_label = (listing.get("store_label") or "").lower()
-                
-                # Check if query appears in any of these fields
-                if not (query_lower in title or 
-                       query_lower in sku or 
-                       query_lower in store_name or 
-                       query_lower in store_label):
-                    continue
+        if query_lower:
+            title = str(listing.get("title") or "").lower()
+            sku = str(listing.get("sku") or "").lower()
+            store_name = str(listing.get("store_name") or "").lower()
+            store_label = str(listing.get("store_label") or "").lower()
+            store_id = str(listing.get("store_id") or "").lower()
+            store_zip = str(listing.get("store_zip") or listing.get("zip") or "").lower()
+            category = str(listing.get("category") or "").lower()
+
+            haystacks = (
+                title,
+                sku,
+                store_name,
+                store_label,
+                store_id,
+                store_zip,
+                category,
+            )
+
+            matched = any(query_lower in hay for hay in haystacks if hay)
+            if not matched and query_digits:
+                store_digits = "".join(ch for ch in store_id if ch.isdigit())
+                zip_digits = "".join(ch for ch in store_zip if ch.isdigit())
+                matched = query_digits in {store_digits, store_digits.lstrip("0"), zip_digits}
+
+            if not matched:
+                continue
 
         result.append(listing)
     return result
@@ -1739,7 +1808,7 @@ def _render_dashboard(
         session,
         state=state if region == "WA_OR" else None,
         region=region,
-        min_pct_off=filters.get("discount_min"),
+        min_pct_off=None,
         selected=category,
     )
     last_updated = repo.get_latest_timestamp(session)
@@ -2230,6 +2299,7 @@ def api_clearance(
     scope: Scope = Query("all", description="Dataset to export (all or new)."),
     state: str | None = Query(None, description="State filter (WA or OR)."),
     category: str | None = Query(None, description="Optional category filter."),
+    search: str | None = Query(None, description="Search by item name, store, or SKU."),
     time_window: str = Query("all", description="Time filter window key."),
     discount_filter: str | None = Query(
         "50", description="Discount preset (percentage or custom)."
@@ -2283,6 +2353,7 @@ def api_clearance(
         price_now_min=price_now_min,
         price_now_max=price_now_max,
         sort_order=sort_order,
+        search=search,
     )
     raw_items = _select_items(
         session,

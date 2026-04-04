@@ -25,7 +25,7 @@ from app.auth.models import User, Subscription, SubscriptionPlan, SubscriptionSt
 from app.notifications.models import DealAlert, NotificationType, NotificationFrequency
 from app.notifications.processor import process_new_deals
 from app.notifications.email_service import is_email_configured
-from app.auth.service import hash_password
+from app.auth.service import AuthService
 from app.logging_config import get_logger
 
 LOGGER = get_logger(__name__)
@@ -72,7 +72,7 @@ def setup_test_data():
             print("\n📝 Creating test user...")
             test_user = User(
                 email="rob@redhatfunding.com",
-                password_hash=hash_password("testpassword123"),
+                password_hash=AuthService.hash_password("testpassword123"),
                 display_name="Rob Test",
                 is_active=True,
                 is_verified=True,

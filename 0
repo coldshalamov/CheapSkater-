@@ -1,0 +1,1 @@
+select count(*) from observations where (pct_off is null or pct_off=0) and price is not null and price_was is not null and price_was and price and price_was; 
