@@ -1,0 +1,5 @@
+Remove temporary commit helper
+
+Delete the accidentally committed commit-message helper artifact.
+
+Co-authored-by: Codex <noreply@openai.com>
