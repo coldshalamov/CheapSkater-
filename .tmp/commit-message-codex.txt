@@ -1,0 +1,5 @@
+Fix stale deal expiration scoping
+
+Persist category_url provenance for CheapSkater ingest rows so stale expirations can honor the coordinator's store/category contract. Restrict expirations to the exact product URL, keep stale cleanup from deleting history for active listings, and add regression coverage for category scope, URL churn, and active-history preservation.
+
+Co-authored-by: Codex <noreply@openai.com>

@@ -402,3 +402,167 @@ def test_normalize_availability_records_updates_schema_entries(db_session) -> No
     assert db_session.scalar(select(Observation.availability)) == "In Stock"
     history_avail = db_session.scalar(select(StorePriceHistory.availability))
     assert history_avail == "Out of Stock"
+
+
+def test_delete_store_listing_only_removes_exact_url_for_same_sku(db_session) -> None:
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        Observation(
+            ts_utc=now - timedelta(days=1),
+            store_id="store-1",
+            store_name="Store 1",
+            zip="97204",
+            sku="sku-1",
+            retailer="lowes",
+            title="Item One",
+            category="Roofing",
+            category_url="https://example.com/cat/new",
+            product_url="https://example.com/pd/new",
+            image_url=None,
+            price=9.0,
+            price_was=15.0,
+            pct_off=0.4,
+            clearance=True,
+            availability="In Stock",
+        )
+    )
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-1",
+        title="Item One",
+        category="Roofing",
+        category_url="https://example.com/cat/old",
+        ts_utc=now - timedelta(days=2),
+        price=10.0,
+        price_was=15.0,
+        pct_off=0.33,
+        availability="In Stock",
+        product_url="https://example.com/pd/old",
+        image_url=None,
+        clearance=True,
+    )
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-1",
+        title="Item One",
+        category="Roofing",
+        category_url="https://example.com/cat/new",
+        ts_utc=now - timedelta(days=1),
+        price=9.0,
+        price_was=15.0,
+        pct_off=0.4,
+        availability="In Stock",
+        product_url="https://example.com/pd/new",
+        image_url=None,
+        clearance=True,
+    )
+    db_session.commit()
+
+    result = repo.delete_store_listing(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        product_url="https://example.com/pd/old",
+        category_url="https://example.com/cat/old",
+    )
+    db_session.commit()
+
+    assert result["removed"] is True
+    remaining_history = (
+        db_session.execute(
+            select(StorePriceHistory).order_by(StorePriceHistory.updated_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    remaining_observations = db_session.execute(select(Observation)).scalars().all()
+    assert [row.product_url for row in remaining_history] == ["https://example.com/pd/new"]
+    assert [row.product_url for row in remaining_observations] == [
+        "https://example.com/pd/new"
+    ]
+
+
+def test_cleanup_stale_clearance_data_keeps_history_for_active_listing(db_session) -> None:
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        Store(id="store-1", name="Store 1", city="Portland", state="OR", zip="97204")
+    )
+    db_session.flush()
+
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-active",
+        title="Active Item",
+        category="Roofing",
+        ts_utc=now - timedelta(days=40),
+        price=10.0,
+        price_was=15.0,
+        pct_off=0.33,
+        availability="In Stock",
+        product_url="https://example.com/pd/active-old",
+        image_url=None,
+        clearance=True,
+    )
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-active",
+        title="Active Item",
+        category="Roofing",
+        ts_utc=now - timedelta(days=1),
+        price=8.0,
+        price_was=15.0,
+        pct_off=0.47,
+        availability="In Stock",
+        product_url="https://example.com/pd/active-new",
+        image_url=None,
+        clearance=True,
+    )
+    repo.update_price_history(
+        db_session,
+        retailer="lowes",
+        store_id="store-1",
+        sku="sku-stale",
+        title="Stale Item",
+        category="Roofing",
+        ts_utc=now - timedelta(days=35),
+        price=12.0,
+        price_was=18.0,
+        pct_off=0.33,
+        availability="In Stock",
+        product_url="https://example.com/pd/stale",
+        image_url=None,
+        clearance=True,
+    )
+    db_session.commit()
+
+    result = repo.cleanup_stale_clearance_data(
+        db_session,
+        retailer="lowes",
+        max_age_days=30,
+    )
+    db_session.commit()
+
+    assert result["history_rows_deleted"] == 1
+    remaining_history = (
+        db_session.execute(
+            select(StorePriceHistory)
+            .where(StorePriceHistory.sku == "sku-active")
+            .order_by(StorePriceHistory.updated_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    assert [row.product_url for row in remaining_history] == [
+        "https://example.com/pd/active-old",
+        "https://example.com/pd/active-new",
+    ]
+    listings = repo.get_clearance_items(db_session)
+    assert [row["sku"] for row in listings] == ["sku-active"]

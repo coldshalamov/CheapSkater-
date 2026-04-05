@@ -112,6 +112,24 @@ def _ensure_schema_up_to_date():
                 conn.commit()
                 LOGGER.info("Auto-migration successful.")
 
+            cursor.execute("PRAGMA table_info(observations)")
+            observation_columns = [row[1] for row in cursor.fetchall()]
+            cursor.execute("PRAGMA table_info(store_price_history)")
+            history_columns = [row[1] for row in cursor.fetchall()]
+
+            schema_changed = False
+            if "category_url" not in observation_columns:
+                cursor.execute("ALTER TABLE observations ADD COLUMN category_url TEXT")
+                schema_changed = True
+            if "category_url" not in history_columns:
+                cursor.execute(
+                    "ALTER TABLE store_price_history ADD COLUMN category_url TEXT"
+                )
+                schema_changed = True
+            if schema_changed:
+                conn.commit()
+                LOGGER.info("Added missing category_url provenance columns.")
+
             # Always run region backfill/repair on startup
             # This fixes cases where stores were added (e.g. via ingest) without a region
             cursor.execute("""
@@ -2565,6 +2583,7 @@ def ingest_data(
             sku=sku,
             title=deal.title,
             category=category_name,
+            category_url=deal.category_url,
             price=deal.price,
             price_was=deal.was_price,
             pct_off=deal.pct_off,
@@ -2591,6 +2610,7 @@ def ingest_data(
             product_url=deal.product_url,
             image_url=image_url,
             clearance=True,
+            category_url=deal.category_url,
         )
         upserted_count += 1
 

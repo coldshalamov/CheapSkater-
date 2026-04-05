@@ -195,6 +195,10 @@ python scripts/verify_db.py
 - **Deployment**: Auto-deploy from GitHub main branch
 - **Logs**: Available in Render dashboard
 
+## Session Log
+
+- [2026-04-04] Codex: Added `POST /api/ingest/expire` with the same API-key auth as `/api/ingest/deals`, deleting store-specific stale listings from `StorePriceHistory` and `Observation` when Gloorbot reports them off-sale. Added a 30-day max-age fence for live clearance queries plus best-effort cleanup of rows older than that threshold, and updated grouped dashboard cards so the headline timestamp is explicitly "most recently seen at any store" while each store card shows its own observed time. Verified with `python -m pytest tests/test_ingest_expiration.py tests/test_paywall_delay.py tests/test_dashboard.py tests/test_template_rendering.py -q` (15 passed).
+
 ## When to Ask User
 
 Ask the user if:

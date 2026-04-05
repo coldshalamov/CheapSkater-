@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.normalizers import extract_category_name
@@ -48,6 +49,7 @@ DB_BUSY_TIMEOUT = float(os.getenv("DB_BUSY_TIMEOUT", "30"))
 _engine = get_engine(str(DATABASE_FILE), busy_timeout=DB_BUSY_TIMEOUT)
 init_db(_engine)
 _session_factory = make_session(_engine)
+_last_stale_cleanup_at: datetime | None = None
 
 
 def get_session():
@@ -81,10 +83,32 @@ class IngestRequest(BaseModel):
     deals: list[GloorbotDeal]
 
 
+class ExpiredDealItem(BaseModel):
+    store_id: str
+    product_url: str
+
+
+class ExpireRequest(BaseModel):
+    source: str = Field(default="gloorbot", description="Source system identifier")
+    client_id: str | None = None
+    task_id: int | None = None
+    category_url: str | None = None
+    store_id: str | None = None
+    expired_deals: list[ExpiredDealItem] = Field(default_factory=list)
+
+
 class IngestResponse(BaseModel):
     ok: bool
     accepted: int
     errors: int = 0
+    message: str = ""
+
+
+class ExpireResponse(BaseModel):
+    ok: bool
+    removed: int
+    history_rows_deleted: int = 0
+    observation_rows_deleted: int = 0
     message: str = ""
 
 
@@ -172,6 +196,42 @@ def parse_store_info(store_id: str, store_name: str) -> dict[str, str]:
     return {"city": city, "state": state}
 
 
+def _validate_ingest_api_key(x_api_key: str) -> None:
+    if INGEST_API_KEY and x_api_key != INGEST_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def _maybe_cleanup_stale_rows(session: Session) -> dict[str, int]:
+    global _last_stale_cleanup_at
+
+    max_age_days = repo.get_max_listing_age_days()
+    interval_hours_raw = (os.getenv("CHEAPSKATER_STALE_CLEANUP_INTERVAL_HOURS") or "6").strip()
+    try:
+        interval_hours = max(1, int(interval_hours_raw))
+    except ValueError:
+        interval_hours = 6
+
+    now = datetime.now(timezone.utc)
+    if _last_stale_cleanup_at and (now - _last_stale_cleanup_at) < timedelta(hours=interval_hours):
+        return {"history_rows_deleted": 0, "observation_rows_deleted": 0}
+
+    cleanup_result = repo.cleanup_stale_clearance_data(
+        session,
+        retailer="lowes",
+        max_age_days=max_age_days,
+    )
+    _last_stale_cleanup_at = now
+
+    if cleanup_result["history_rows_deleted"] or cleanup_result["observation_rows_deleted"]:
+        LOGGER.info(
+            "[STALE_CLEANUP] max_age_days=%s history_rows_deleted=%s observation_rows_deleted=%s",
+            max_age_days,
+            cleanup_result["history_rows_deleted"],
+            cleanup_result["observation_rows_deleted"],
+        )
+    return cleanup_result
+
+
 @router.post("/deals", response_model=IngestResponse)
 def ingest_deals(
     request: IngestRequest,
@@ -184,9 +244,7 @@ def ingest_deals(
 ):
     """Receive deals from Gloorbot and insert into Cheapskater database."""
 
-    # Validate API key if configured
-    if INGEST_API_KEY and x_api_key != INGEST_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    _validate_ingest_api_key(x_api_key)
 
     batch_id = request.batch_id or x_gloorbot_batch_id or ""
     client_id = request.client_id or x_gloorbot_client_id or ""
@@ -198,6 +256,7 @@ def ingest_deals(
         len(request.deals),
         str(DATABASE_FILE),
     )
+    _maybe_cleanup_stale_rows(session)
     accepted = 0
     errors = 0
 
@@ -266,6 +325,7 @@ def ingest_deals(
                 product_url=deal.product_url,
                 image_url=deal.image_url,
                 clearance=True,
+                category_url=deal.category_url,
             )
 
             accepted += 1
@@ -357,6 +417,69 @@ def ingest_deals(
         accepted=accepted,
         errors=errors,
         message=f"Processed {len(request.deals)} deals from {request.source}",
+    )
+
+
+@router.post("/expire", response_model=ExpireResponse)
+def expire_deals(
+    request: ExpireRequest,
+    session: Session = Depends(get_session),
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+    x_gloorbot_client_id: str = Header(default="", alias="X-Gloorbot-Client-Id"),
+):
+    """Delete store-specific deals that the coordinator marked as no longer on sale."""
+
+    _validate_ingest_api_key(x_api_key)
+
+    client_id = request.client_id or x_gloorbot_client_id or ""
+    _maybe_cleanup_stale_rows(session)
+
+    removed = 0
+    history_rows_deleted = 0
+    observation_rows_deleted = 0
+    seen_pairs: set[tuple[str, str]] = set()
+
+    for expired in request.expired_deals:
+        store_id = normalize_store_id(expired.store_id)
+        product_url = (expired.product_url or "").strip()
+        if not store_id or not product_url:
+            continue
+        key = (store_id, product_url)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+
+        result = repo.delete_store_listing(
+            session,
+            retailer="lowes",
+            store_id=store_id,
+            product_url=product_url,
+            category_url=(request.category_url or "").strip() or None,
+        )
+        history_rows_deleted += int(result["history_rows_deleted"])
+        observation_rows_deleted += int(result["observation_rows_deleted"])
+        if result["removed"]:
+            removed += 1
+
+    session.commit()
+
+    LOGGER.info(
+        "[EXPIRE] client_id=%s task_id=%s store_id=%s requested=%s removed=%s history_rows_deleted=%s observation_rows_deleted=%s",
+        client_id,
+        request.task_id,
+        request.store_id,
+        len(seen_pairs),
+        removed,
+        history_rows_deleted,
+        observation_rows_deleted,
+    )
+
+    return ExpireResponse(
+        ok=True,
+        removed=removed,
+        history_rows_deleted=history_rows_deleted,
+        observation_rows_deleted=observation_rows_deleted,
+        message=f"Expired {removed} store listings",
     )
 
 

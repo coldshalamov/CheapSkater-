@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterable
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.normalizers import normalize_availability
@@ -40,6 +40,25 @@ CSV_HEADER = [
     "product_url",
     "image_url",
 ]
+
+DEFAULT_MAX_LISTING_AGE_DAYS = 30
+
+
+def get_max_listing_age_days() -> int:
+    """Return the maximum age for listings that should still appear live."""
+
+    raw = (os.getenv("CHEAPSKATER_MAX_LISTING_AGE_DAYS") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_LISTING_AGE_DAYS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_LISTING_AGE_DAYS
+    return value if value > 0 else DEFAULT_MAX_LISTING_AGE_DAYS
+
+
+def _active_listing_cutoff() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=get_max_listing_age_days())
 
 
 def upsert_store(
@@ -156,6 +175,7 @@ def update_price_history(
     image_url: str | None,
     clearance: bool | None,
     region: str | None = None,
+    category_url: str | None = None,
 ) -> StorePriceHistory:
     """Record a compressed price history entry for a store listing."""
 
@@ -205,6 +225,7 @@ def update_price_history(
         last_entry.pct_off = pct_off
         last_entry.availability = normalized_availability
         last_entry.product_url = product_url
+        last_entry.category_url = category_url
         last_entry.title = title
         last_entry.category = category
         last_entry.clearance = clearance
@@ -217,6 +238,7 @@ def update_price_history(
     elif last_entry and state_matches:
         last_entry.updated_at = ts_utc
         last_entry.product_url = product_url
+        last_entry.category_url = category_url
         last_entry.title = title
         last_entry.category = category
         if image_url:
@@ -232,6 +254,7 @@ def update_price_history(
             sku=sku,
             title=title,
             category=category,
+            category_url=category_url,
             started_at=ts_utc,
             updated_at=ts_utc,
             price=price,
@@ -406,6 +429,10 @@ def _latest_history_statement(
     stmt = (
         select(subquery).where(subquery.c.rn == 1).where(subquery.c.clearance.is_(True))
     )
+    stmt = stmt.where(
+        func.coalesce(subquery.c.updated_at, subquery.c.price_started_at)
+        >= _active_listing_cutoff()
+    )
 
     if region:
         stmt = stmt.join(Store, Store.id == subquery.c.store_id, isouter=True)
@@ -570,6 +597,125 @@ def get_clearance_by_category(
         region=region,
         limit=limit,
     )
+
+
+def delete_store_listing(
+    session: Session,
+    *,
+    retailer: str,
+    store_id: str,
+    product_url: str,
+    category_url: str | None = None,
+) -> dict[str, int | bool]:
+    """Delete all stored records for a single store-specific listing."""
+
+    if not store_id or not product_url:
+        return {
+            "removed": False,
+            "history_rows_deleted": 0,
+            "observation_rows_deleted": 0,
+        }
+
+    history_conditions = [
+        StorePriceHistory.retailer == retailer,
+        StorePriceHistory.store_id == store_id,
+        StorePriceHistory.product_url == product_url,
+    ]
+    observation_conditions = [
+        Observation.retailer == retailer,
+        Observation.store_id == store_id,
+        Observation.product_url == product_url,
+    ]
+    if category_url:
+        history_conditions.append(
+            or_(
+                StorePriceHistory.category_url == category_url,
+                StorePriceHistory.category_url.is_(None),
+            )
+        )
+        observation_conditions.append(
+            or_(
+                Observation.category_url == category_url,
+                Observation.category_url.is_(None),
+            )
+        )
+
+    history_rows_deleted = (
+        session.execute(delete(StorePriceHistory).where(and_(*history_conditions))).rowcount
+        or 0
+    )
+    observation_rows_deleted = (
+        session.execute(delete(Observation).where(and_(*observation_conditions))).rowcount
+        or 0
+    )
+
+    return {
+        "removed": (history_rows_deleted + observation_rows_deleted) > 0,
+        "history_rows_deleted": int(history_rows_deleted),
+        "observation_rows_deleted": int(observation_rows_deleted),
+    }
+
+
+def cleanup_stale_clearance_data(
+    session: Session,
+    *,
+    retailer: str = "lowes",
+    max_age_days: int | None = None,
+) -> dict[str, int]:
+    """Delete old clearance rows so stale data does not accumulate forever."""
+
+    resolved_days = max_age_days if max_age_days is not None else get_max_listing_age_days()
+    if resolved_days <= 0:
+        return {"history_rows_deleted": 0, "observation_rows_deleted": 0}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=resolved_days)
+    stale_history_pairs = (
+        select(StorePriceHistory.store_id, StorePriceHistory.sku)
+        .where(StorePriceHistory.retailer == retailer)
+        .group_by(StorePriceHistory.store_id, StorePriceHistory.sku)
+        .having(func.max(StorePriceHistory.updated_at) < cutoff)
+        .subquery()
+    )
+    stale_observation_pairs = (
+        select(Observation.store_id, Observation.sku)
+        .where(Observation.retailer == retailer)
+        .group_by(Observation.store_id, Observation.sku)
+        .having(func.max(Observation.ts_utc) < cutoff)
+        .subquery()
+    )
+    history_rows_deleted = (
+        session.execute(
+            delete(StorePriceHistory).where(
+                StorePriceHistory.retailer == retailer,
+                exists(
+                    select(1)
+                    .select_from(stale_history_pairs)
+                    .where(stale_history_pairs.c.store_id == StorePriceHistory.store_id)
+                    .where(stale_history_pairs.c.sku == StorePriceHistory.sku)
+                ),
+            )
+        ).rowcount
+        or 0
+    )
+    observation_rows_deleted = (
+        session.execute(
+            delete(Observation).where(
+                Observation.retailer == retailer,
+                exists(
+                    select(1)
+                    .select_from(stale_observation_pairs)
+                    .where(stale_observation_pairs.c.store_id == Observation.store_id)
+                    .where(stale_observation_pairs.c.sku == Observation.sku)
+                ),
+            )
+        ).rowcount
+        or 0
+    )
+
+    return {
+        "history_rows_deleted": int(history_rows_deleted),
+        "observation_rows_deleted": int(observation_rows_deleted),
+    }
 
 
 def normalize_availability_records(session: Session) -> int:
