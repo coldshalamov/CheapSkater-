@@ -26,7 +26,11 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.middleware.simple_session import SimpleSessionMiddleware
 from app.lowes_stores_wa_or import LOWES_STORES_WA_OR
-from app.normalizers import extract_category_name
+from app.normalizers import (
+    extract_category_name,
+    normalize_display_category_name,
+    resolve_category_name,
+)
 from app.storage import repo
 from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Observation
@@ -511,6 +515,7 @@ def _prepare_listing(listing: dict[str, Any]) -> dict[str, Any]:
     enriched["store_product_url"] = _store_specific_url(
         enriched.get("product_url"), enriched.get("store_id")
     )
+    enriched["category"] = normalize_display_category_name(enriched.get("category"))
     added_ts = enriched.get("first_seen") or enriched.get("price_started_at")
     enriched["days_since_added"] = _relative_days(added_ts)
     stock_estimate = _estimate_stock_units(enriched.get("availability"))
@@ -1103,6 +1108,11 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         "first_seen": _ts(listing.get("first_seen")),
         "price_started_at": _ts(listing.get("price_started_at")),
         "updated_at": _ts(listing.get("updated_at")),
+        "observed_at": _ts(
+            listing.get("updated_at")
+            or listing.get("price_started_at")
+            or listing.get("first_seen")
+        ),
         "prev_price": listing.get("prev_price"),
         "prev_price_was": listing.get("prev_price_was"),
         "prev_pct_off": listing.get("prev_pct_off"),
@@ -1560,39 +1570,56 @@ def _select_items(
     if is_paid:
         if scope == "new":
             return repo.get_new_clearance_today(
-                session, state=state, category=category, region=region
+                session, state=state, category=None, region=region
             )
         return repo.get_clearance_items(
-            session, state=state, category=category, region=region
+            session, state=state, category=None, region=region
         )
 
     # Free tier sees only older deals (3+ days old)
     # This applies to BOTH main page and "new today" page
     return repo.get_older_clearance_items(
-        session, state=state, category=category, region=region, min_days_old=3
+        session, state=state, category=None, region=region, min_days_old=3
     )
 
 
 def _collect_categories(
-    session: Session,
+    listings: Iterable[dict[str, Any]],
     *,
-    state: str | None = None,
-    region: str | None = None,
-    min_pct_off: float | None = None,
     selected: str | None = None,
 ) -> list[str]:
-    discovered = repo.list_distinct_categories(
-        session, state=state, region=region, min_pct_off=min_pct_off
-    )
-    merged = list(discovered)
+    merged = []
+    seen: set[str] = set()
+    for listing in listings:
+        category = normalize_display_category_name(listing.get("category"))
+        if not category:
+            continue
+        key = category.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(category)
     if selected:
-        cleaned = selected.strip()
+        cleaned = normalize_display_category_name(selected.strip())
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
     merged = sorted(
         {*DEFAULT_CATEGORY_OPTIONS, *merged}, key=lambda value: value.casefold()
     )
     return merged
+
+
+def _apply_category_filter(
+    listings: Iterable[dict[str, Any]], category: str | None
+) -> list[dict[str, Any]]:
+    normalized_category = normalize_display_category_name(category)
+    if not normalized_category:
+        return list(listings)
+    return [
+        listing
+        for listing in listings
+        if normalize_display_category_name(listing.get("category")) == normalized_category
+    ]
 
 
 @app.get("/cheapskater")
@@ -1794,8 +1821,9 @@ def _render_dashboard(
     state_filtered = _filter_by_state(
         prepared_items, state if region == "WA_OR" else None
     )
+    category_filtered = _apply_category_filter(state_filtered, category)
 
-    items = _apply_filters(state_filtered, filters=filters)
+    items = _apply_filters(category_filtered, filters=filters)
     # Count unique stores across all listings
     unique_store_ids = {item.get("store_id") for item in items if item.get("store_id")}
     store_count = len(unique_store_ids)
@@ -1809,13 +1837,7 @@ def _render_dashboard(
         len(initial_groups),
         store_count,
     )
-    categories = _collect_categories(
-        session,
-        state=state if region == "WA_OR" else None,
-        region=region,
-        min_pct_off=None,
-        selected=category,
-    )
+    categories = _collect_categories(state_filtered, selected=category)
     last_updated = repo.get_latest_timestamp(session)
 
     # Default title
@@ -1951,7 +1973,7 @@ def list_clearance(
 ):
     """Render the Florida clearance dashboard (default view)."""
 
-    normalized_category = category or None
+    normalized_category = normalize_display_category_name(category or None)
     filters = _normalize_filters(
         time_window=time_window,
         discount_filter=discount_filter,
@@ -2377,13 +2399,14 @@ def api_clearance(
         session,
         scope=scope,
         state=None,
-        category=normalized_category,
+        category=None,
         user=user,
         is_paid=is_pro,
     )
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, normalized_state)
-    items = _apply_filters(state_filtered, filters=filters)
+    category_filtered = _apply_category_filter(state_filtered, normalized_category)
+    items = _apply_filters(category_filtered, filters=filters)
     grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     payload = [_serialize_observation(item) for item in items]
@@ -2418,7 +2441,8 @@ def api_clearance(
 def api_categories(session: Session = Depends(get_session)) -> list[str]:
     """Return a sorted list of distinct clearance categories."""
 
-    return repo.list_distinct_categories(session)
+    items = _prepare_listings(repo.get_clearance_items(session))
+    return _collect_categories(items)
 
 
 @app.get("/api/deals")
@@ -2432,16 +2456,17 @@ def api_deals(
     user = _load_user_from_request(session, request)
     is_pro, _subscription_plan = _get_user_subscription_info(session, user)
 
-    normalized_category = (category or "").strip() or None
+    normalized_category = normalize_display_category_name((category or "").strip() or None)
     raw_items = _select_items(
         session,
         scope="all",
         state=None,
-        category=normalized_category,
+        category=None,
         user=user,
         is_paid=is_pro,
     )
     prepared_items = _prepare_listings(raw_items)
+    prepared_items = _apply_category_filter(prepared_items, normalized_category)
     payload = [_serialize_observation(item) for item in prepared_items]
     return JSONResponse(
         content={
@@ -2536,8 +2561,7 @@ def ingest_data(
             region=store_region,
         )
 
-        preferred_category = (deal.category_name or "").strip()
-        category_name = preferred_category or _extract_category_name(deal.category_url)
+        category_name = resolve_category_name(deal.category_name, deal.category_url)
 
         image_url = deal.image_url
         image_url = _sanitize_image_url(image_url)

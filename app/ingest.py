@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, inspect, text
 
 from app.logging_config import get_logger
-from app.normalizers import extract_category_name
+from app.normalizers import resolve_category_name
 from app.storage.db import get_engine, init_db, make_session, resolve_database_file
 from app.storage.models_sql import Store, Observation, StorePriceHistory
 from app.storage import repo
@@ -141,10 +141,7 @@ def _calculate_discount_percent(price: float, was_price: float) -> float:
 
 
 def _resolve_category(deal: GloorbotDeal) -> str:
-    preferred = (deal.category_name or "").strip()
-    if preferred:
-        return preferred
-    return extract_category_name(deal.category_url)
+    return resolve_category_name(deal.category_name, deal.category_url)
 
 
 def normalize_store_id(value: str) -> str:
