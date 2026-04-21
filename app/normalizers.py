@@ -2,6 +2,41 @@
 
 from __future__ import annotations
 
+import re
+
+
+_CATEGORY_SPACE_RE = re.compile(r"\s+")
+_CATEGORY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_CATEGORY_SPEC_HINTS = {
+    "btu",
+    "capacity",
+    "coverage",
+    "deep",
+    "diameter",
+    "feet",
+    "foot",
+    "ft",
+    "gallon",
+    "gauge",
+    "high",
+    "hp",
+    "in",
+    "inch",
+    "inches",
+    "long",
+    "maximum",
+    "pack",
+    "seconds",
+    "series",
+    "sq",
+    "tall",
+    "volt",
+    "volts",
+    "watt",
+    "watts",
+    "wide",
+}
+
 
 def extract_category_name(category_url: str | None) -> str:
     """
@@ -34,6 +69,76 @@ def extract_category_name(category_url: str | None) -> str:
         return name.title() if name else "Uncategorized"
     except Exception:
         return "Uncategorized"
+
+
+def _clean_category_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return _CATEGORY_SPACE_RE.sub(" ", value.strip(" -_/|,")).strip()
+
+
+def is_suspicious_category_name(value: str | None) -> bool:
+    """Return True when a category looks like a spec fragment or product-title snippet."""
+
+    cleaned = _clean_category_text(value)
+    if not cleaned:
+        return True
+
+    lowered = cleaned.casefold()
+    if lowered in {"clearance", "uncategorized"}:
+        return False
+
+    if cleaned.endswith(" And"):
+        return True
+
+    tokens = _CATEGORY_TOKEN_RE.findall(cleaned)
+    if not tokens:
+        return True
+
+    numeric_tokens = sum(any(ch.isdigit() for ch in token) for token in tokens)
+    starts_numeric = any(ch.isdigit() for ch in tokens[0])
+    spec_hints = {token.casefold() for token in tokens} & _CATEGORY_SPEC_HINTS
+
+    if len(cleaned) > 80:
+        return True
+    if starts_numeric and len(tokens) == 1:
+        return True
+    if starts_numeric and (spec_hints or len(tokens) >= 3):
+        return True
+    if numeric_tokens >= 2 and len(tokens) >= 4:
+        return True
+    if len(tokens) >= 7 and len(cleaned) >= 40:
+        return True
+
+    return False
+
+
+def normalize_display_category_name(value: str | None) -> str | None:
+    """Normalize a stored category for UI display, hiding obviously bad labels."""
+
+    cleaned = _clean_category_text(value)
+    if not cleaned or is_suspicious_category_name(cleaned):
+        return None
+    return cleaned
+
+
+def resolve_category_name(
+    preferred: str | None, category_url: str | None, default: str = "Clearance"
+) -> str:
+    """Choose the best category name from scraped text and Lowe's category URL."""
+
+    cleaned = _clean_category_text(preferred)
+    if cleaned and not is_suspicious_category_name(cleaned):
+        return cleaned
+
+    extracted = extract_category_name(category_url)
+    if extracted and extracted != "Uncategorized":
+        return extracted
+
+    if cleaned and not is_suspicious_category_name(cleaned):
+        return cleaned
+
+    return default
 
 
 def normalize_availability(value: str | None) -> str | None:
@@ -72,4 +177,10 @@ def normalize_availability(value: str | None) -> str | None:
     return trimmed
 
 
-__all__ = ["extract_category_name", "normalize_availability"]
+__all__ = [
+    "extract_category_name",
+    "is_suspicious_category_name",
+    "normalize_availability",
+    "normalize_display_category_name",
+    "resolve_category_name",
+]

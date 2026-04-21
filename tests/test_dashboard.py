@@ -522,3 +522,188 @@ def test_api_sort_orders(tmp_path) -> None:
     assert price_low.status_code == 200
     low_prices = [group["min_price"] for group in price_low.json()["groups"]]
     assert low_prices == sorted(low_prices)
+
+
+def test_homepage_shows_per_store_observed_times_for_grouped_deals(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+        store_primary = Store(
+            id="1109",
+            name="Stuart Lowe's",
+            city="Stuart",
+            state="FL",
+            zip="34994",
+            region="FL",
+        )
+        store_secondary = Store(
+            id="1841",
+            name="Hialeah Lowe's",
+            city="Hialeah",
+            state="FL",
+            zip="33012",
+            region="FL",
+        )
+        session.add_all([store_primary, store_secondary])
+        session.flush()
+
+        primary_seen = datetime(2026, 4, 9, 18, 57, tzinfo=timezone.utc)
+        secondary_seen = datetime(2026, 4, 2, 14, 15, tzinfo=timezone.utc)
+        observations = [
+            Observation(
+                ts_utc=primary_seen,
+                store_id=store_primary.id,
+                store_name=store_primary.name,
+                zip=store_primary.zip,
+                sku="sku-grouped",
+                retailer="lowes",
+                title="Grouped Deal",
+                category="Tools",
+                product_url="https://example.com/grouped?store=1109",
+                image_url=None,
+                price=12.0,
+                price_was=24.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+            ),
+            Observation(
+                ts_utc=secondary_seen,
+                store_id=store_secondary.id,
+                store_name=store_secondary.name,
+                zip=store_secondary.zip,
+                sku="sku-grouped",
+                retailer="lowes",
+                title="Grouped Deal",
+                category="Tools",
+                product_url="https://example.com/grouped?store=1841",
+                image_url=None,
+                price=14.0,
+                price_was=28.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="Limited stock",
+            ),
+        ]
+        session.add_all(observations)
+        session.commit()
+
+        for obs in observations:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+            )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/", params={"discount_filter": "all"})
+
+    assert response.status_code == 200
+    assert "Most recently seen at any store Apr 09, 2026 01:57 PM ET" in response.text
+    assert "Seen at this store Apr 09, 2026 01:57 PM ET" in response.text
+    assert "Seen at this store Apr 02, 2026 09:15 AM ET" in response.text
+
+
+def test_ingest_route_normalizes_suspicious_category_names(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+    client = TestClient(app)
+    ingest_response = client.post(
+        "/api/ingest/deals",
+        json={
+            "source": "test-suite",
+            "deals": [
+                {
+                    "store_id": "1109",
+                    "store_name": "Stuart, FL (#1109)",
+                    "category_name": "0 1 Foot Long",
+                    "category_url": "https://www.lowes.com/pl/air-conditioners-fans/portable-fans/4294856700",
+                    "product_url": "https://www.lowes.com/pd/Portable-Fan/5001844889",
+                    "title": "Portable Fan",
+                    "image_url": None,
+                    "price": 10.0,
+                    "was_price": 20.0,
+                    "pct_off": 50.0,
+                    "found_at": "2026-04-09T18:57:00Z",
+                }
+            ],
+        },
+    )
+
+    assert ingest_response.status_code == 200
+    assert ingest_response.json()["accepted"] == 1
+
+    categories = client.get("/api/categories")
+    assert categories.status_code == 200
+    assert "Portable Fans" in categories.json()
+    assert "0 1 Foot Long" not in categories.json()
+
+    clearance = client.get("/api/clearance", params={"discount_filter": "all"})
+    assert clearance.status_code == 200
+    assert clearance.json()["items"][0]["category"] == "Portable Fans"
+
+    homepage = client.get("/", params={"discount_filter": "all"})
+    assert homepage.status_code == 200
+    assert "Portable Fans" in homepage.text
+    assert "0 1 Foot Long" not in homepage.text
+
+
+def test_ingest_route_preserves_good_new_worker_category_names(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+    client = TestClient(app)
+    ingest_response = client.post(
+        "/api/ingest/deals",
+        json={
+            "source": "test-suite",
+            "deals": [
+                {
+                    "store_id": "1109",
+                    "store_name": "Stuart, FL (#1109)",
+                    "category_name": "Ethernet Cables",
+                    "category_url": "https://www.lowes.com/pl/electrical-cable-wire/networking-cable/4294418126",
+                    "product_url": "https://www.lowes.com/pd/Ethernet-Cable/5001844999",
+                    "title": "Ethernet Cable",
+                    "image_url": None,
+                    "price": 12.0,
+                    "was_price": 24.0,
+                    "pct_off": 50.0,
+                    "found_at": "2026-04-09T18:57:00Z",
+                }
+            ],
+        },
+    )
+
+    assert ingest_response.status_code == 200
+    assert ingest_response.json()["accepted"] == 1
+
+    categories = client.get("/api/categories")
+    assert categories.status_code == 200
+    assert "Ethernet Cables" in categories.json()
+
+    clearance = client.get("/api/clearance", params={"discount_filter": "all"})
+    assert clearance.status_code == 200
+    assert clearance.json()["items"][0]["category"] == "Ethernet Cables"

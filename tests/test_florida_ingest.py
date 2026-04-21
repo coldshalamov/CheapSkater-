@@ -34,38 +34,38 @@ def test_florida_ingest_region_fix():
             db.close()
 
     app.dependency_overrides[get_session] = override_get_db
-    
-    client = TestClient(app)
-    
-    # 2. Prepare payload with a Florida store
-    payload = {
-        "source": "test_script",
-        "deals": [
-            {
-                "store_id": "1109",
-                "store_name": "Lowe's of Stuart, FL (#1109)",  # Include state in name
-                "product_url": "https://www.lowes.com/pd/Test-Item/50012345",
-                "title": "Florida Palm Tree",
-                "price": 50.0,
-                "was_price": 100.0,
-                "pct_off": 0.50,
-                "found_at": "2026-01-21T12:00:00Z"
-            }
-        ]
-    }
-    
-    # 3. Send Request
-    response = client.post("/api/ingest", json=payload)
-    assert response.status_code == 200, f"Ingest failed: {response.text}"
-    
-    # 4. Verify Store Region in DB
-    db = TestingSessionLocal()
-    store = db.query(Store).filter(Store.id == "1109").first()
-    
-    assert store is not None, "Store was not created"
-    print(f"Store: {store.name}, State: {store.state}, Region: {store.region}")
-    
-    assert store.state == "FL", f"Expected state FL, got {store.state}"
-    assert store.region == "FL", f"Expected region FL, got {store.region} - FIX FAILED"
-    
-    db.close()
+
+    try:
+        client = TestClient(app)
+
+        payload = {
+            "source": "test_script",
+            "deals": [
+                {
+                    "store_id": "1109",
+                    "store_name": "Lowe's of Stuart, FL (#1109)",
+                    "product_url": "https://www.lowes.com/pd/Test-Item/50012345",
+                    "title": "Florida Palm Tree",
+                    "price": 50.0,
+                    "was_price": 100.0,
+                    "pct_off": 0.50,
+                    "found_at": "2026-01-21T12:00:00Z"
+                }
+            ]
+        }
+
+        response = client.post("/api/ingest", json=payload)
+        assert response.status_code == 200, f"Ingest failed: {response.text}"
+
+        db = TestingSessionLocal()
+        store = db.query(Store).filter(Store.id == "1109").first()
+
+        assert store is not None, "Store was not created"
+        print(f"Store: {store.name}, State: {store.state}, Region: {store.region}")
+
+        assert store.state == "FL", f"Expected state FL, got {store.state}"
+        assert store.region == "FL", f"Expected region FL, got {store.region} - FIX FAILED"
+
+        db.close()
+    finally:
+        app.dependency_overrides.pop(get_session, None)
