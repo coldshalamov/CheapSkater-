@@ -9,6 +9,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
+import app.dashboard as dashboard
 from app.dashboard import _normalize_state, _state_from_zip, app, session_factory
 from app.storage import repo
 from app.storage.models_sql import Observation, Store, StorePriceHistory
@@ -524,6 +525,141 @@ def test_api_sort_orders(tmp_path) -> None:
     assert low_prices == sorted(low_prices)
 
 
+def test_grouped_cards_keep_best_price_actions_separate_from_primary_store() -> None:
+    recent_seen = datetime(2026, 4, 9, 18, 57, tzinfo=timezone.utc)
+    cheaper_seen = datetime(2026, 4, 7, 15, 30, tzinfo=timezone.utc)
+    listings = [
+        {
+            "sku": "sku-best-price",
+            "store_id": "recent-store",
+            "store_name": "Recent Store",
+            "store_city": "Recentville",
+            "store_state": "FL",
+            "title": "Pressure Washer",
+            "category": "Tools",
+            "price": 40.0,
+            "price_was": 80.0,
+            "pct_off": 0.5,
+            "product_url": "https://example.com/recent",
+            "store_product_url": "https://example.com/recent?store=recent-store",
+            "updated_at": recent_seen,
+            "first_seen": recent_seen - timedelta(days=2),
+        },
+        {
+            "sku": "sku-best-price",
+            "store_id": "cheap-store",
+            "store_name": "Cheapest Store",
+            "store_city": "Dealton",
+            "store_state": "FL",
+            "title": "Pressure Washer",
+            "category": "Tools",
+            "price": 18.0,
+            "price_was": 60.0,
+            "pct_off": 0.7,
+            "product_url": "https://example.com/cheap",
+            "store_product_url": "https://example.com/cheap?store=cheap-store",
+            "updated_at": cheaper_seen,
+            "first_seen": cheaper_seen - timedelta(days=4),
+        },
+    ]
+
+    grouped = dashboard._group_listings(listings)
+    payload = dashboard._serialize_group(grouped[0])
+
+    assert payload["stores"][0]["store_id"] == "recent-store"
+    assert payload["best_store_id"] == "cheap-store"
+    assert payload["best_product_url"] == "https://example.com/cheap?store=cheap-store"
+    assert payload["min_price"] == 18.0
+
+
+def test_api_clearance_freshness_filters_items_and_groups_consistently(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+        store_fresh = Store(id="store-freshness-1", name="Fresh Store", city="Miami", state="FL", zip="33101", region="FL")
+        store_stale = Store(id="store-freshness-2", name="Stale Store", city="Tampa", state="FL", zip="33602", region="FL")
+        session.add_all([store_fresh, store_stale])
+        session.flush()
+
+        now = datetime.now(timezone.utc)
+        observations = [
+            Observation(
+                ts_utc=now - timedelta(days=2),
+                store_id=store_fresh.id,
+                store_name=store_fresh.name,
+                zip=store_fresh.zip,
+                sku="sku-freshness-keep",
+                retailer="lowes",
+                title="Keep Me",
+                category="Tools",
+                product_url="https://example.com/keep",
+                image_url=None,
+                price=20.0,
+                price_was=40.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+                region="FL",
+            ),
+            Observation(
+                ts_utc=now - timedelta(days=5),
+                store_id=store_stale.id,
+                store_name=store_stale.name,
+                zip=store_stale.zip,
+                sku="sku-freshness-drop",
+                retailer="lowes",
+                title="Drop Me",
+                category="Tools",
+                product_url="https://example.com/drop",
+                image_url=None,
+                price=15.0,
+                price_was=30.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="Limited stock",
+                region="FL",
+            ),
+        ]
+        session.add_all(observations)
+        session.commit()
+
+        for obs in observations:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+                region=obs.region,
+            )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/clearance",
+        params={"discount_filter": "all", "freshness": "3d"},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["count"] == 1
+    assert [item["sku"] for item in payload["items"]] == ["sku-freshness-keep"]
+    assert [group["sku"] for group in payload["groups"]] == ["sku-freshness-keep"]
+    assert payload["filters"]["freshness_choice"] == "3d"
+
+
 def test_homepage_shows_per_store_observed_times_for_grouped_deals(tmp_path) -> None:
     with session_factory() as session:
         session.execute(delete(Observation))
@@ -617,6 +753,102 @@ def test_homepage_shows_per_store_observed_times_for_grouped_deals(tmp_path) -> 
     assert "Most recently seen at any store Apr 09, 2026 01:57 PM ET" in response.text
     assert "Seen at this store Apr 09, 2026 01:57 PM ET" in response.text
     assert "Seen at this store Apr 02, 2026 09:15 AM ET" in response.text
+
+
+def test_homepage_store_pills_respect_freshness_filter(tmp_path) -> None:
+    with session_factory() as session:
+        session.execute(delete(Observation))
+        session.execute(delete(StorePriceHistory))
+        session.execute(delete(Store))
+        session.commit()
+
+        recent_store = Store(
+            id="3010",
+            name="Fresh Picks Store",
+            city="Orlando",
+            state="FL",
+            zip="32801",
+            region="FL",
+        )
+        stale_store = Store(
+            id="3011",
+            name="Old Sightings Store",
+            city="Tallahassee",
+            state="FL",
+            zip="32301",
+            region="FL",
+        )
+        session.add_all([recent_store, stale_store])
+        session.flush()
+
+        now = datetime.now(timezone.utc)
+        observations = [
+            Observation(
+                ts_utc=now - timedelta(days=2),
+                store_id=recent_store.id,
+                store_name=recent_store.name,
+                zip=recent_store.zip,
+                sku="sku-store-pill-fresh",
+                retailer="lowes",
+                title="Fresh Deal",
+                category="Lighting",
+                product_url="https://example.com/fresh-pill",
+                image_url=None,
+                price=9.0,
+                price_was=18.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+                region="FL",
+            ),
+            Observation(
+                ts_utc=now - timedelta(days=5),
+                store_id=stale_store.id,
+                store_name=stale_store.name,
+                zip=stale_store.zip,
+                sku="sku-store-pill-stale",
+                retailer="lowes",
+                title="Stale Deal",
+                category="Lighting",
+                product_url="https://example.com/stale-pill",
+                image_url=None,
+                price=11.0,
+                price_was=22.0,
+                pct_off=0.5,
+                clearance=True,
+                availability="In stock",
+                region="FL",
+            ),
+        ]
+        session.add_all(observations)
+        session.commit()
+
+        for obs in observations:
+            repo.update_price_history(
+                session,
+                retailer="lowes",
+                store_id=obs.store_id,
+                sku=obs.sku,
+                title=obs.title,
+                category=obs.category,
+                ts_utc=obs.ts_utc,
+                price=obs.price,
+                price_was=obs.price_was,
+                pct_off=obs.pct_off,
+                availability=obs.availability,
+                product_url=obs.product_url,
+                image_url=obs.image_url,
+                clearance=obs.clearance,
+                region=obs.region,
+            )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/", params={"discount_filter": "all", "freshness": "3d"})
+
+    assert response.status_code == 200
+    assert "Fresh Picks Store" in response.text
+    assert "Old Sightings Store" not in response.text
 
 
 def test_ingest_route_normalizes_suspicious_category_names(tmp_path) -> None:

@@ -435,8 +435,36 @@ def _relative_days(value: object | None) -> int | None:
     return max(int(delta.total_seconds() // 86400), 0)
 
 
+def _freshness_class(value: object | None) -> str:
+    """Return a CSS class hinting how stale a sighting is.
+
+    - "" (fresh): seen within 24h
+    - "is-stale-warn": 24-48h old (yellow)
+    - "is-stale-alert": >48h old (red)
+
+    Missing timestamps are treated as fresh so we never false-alarm when data
+    is absent.
+    """
+    dt_value = _coerce_datetime(value)
+    if not dt_value:
+        return ""
+    age_hours = (_now_utc() - dt_value).total_seconds() / 3600.0
+    if age_hours >= 48:
+        return "is-stale-alert"
+    if age_hours >= 24:
+        return "is-stale-warn"
+    return ""
+
+
 def _time_delta_for(value: str | None) -> timedelta | None:
     for key, _, delta in TIME_FILTER_OPTIONS:
+        if key == value:
+            return delta
+    return None
+
+
+def _freshness_delta_for(value: str | None) -> timedelta | None:
+    for key, _, delta in FRESHNESS_FILTER_OPTIONS:
         if key == value:
             return delta
     return None
@@ -601,6 +629,7 @@ def _apply_filters(
     listings: Iterable[dict[str, Any]],
     *,
     filters: dict[str, Any],
+    apply_store_filter: bool = True,
 ) -> list[dict[str, Any]]:
     cutoff = filters.get("time_cutoff")
     discount_min = filters.get("discount_min")
@@ -612,6 +641,9 @@ def _apply_filters(
     price_now_min = filters.get("price_now_min")
     price_now_max = filters.get("price_now_max")
     search_query = filters.get("search_query")
+    store_ids_filter: set[str] = (
+        set(filters.get("store_ids") or set()) if apply_store_filter else set()
+    )
     query_lower = (search_query or "").lower().strip() if search_query else ""
     query_digits = "".join(ch for ch in query_lower if ch.isdigit()) if query_lower else ""
 
@@ -621,6 +653,10 @@ def _apply_filters(
         added_dt = _coerce_datetime(added_at)
         if cutoff and (added_dt is None or added_dt < cutoff):
             continue
+        if store_ids_filter:
+            sid = str(listing.get("store_id") or "").strip()
+            if not sid or sid not in store_ids_filter:
+                continue
         if discount_min is not None or discount_max is not None:
             pct_off = _effective_discount_fraction(listing)
             if pct_off is None:
@@ -703,6 +739,8 @@ def _normalize_filters(
     price_now_max: str | float | None = None,
     sort_order: str | None,
     search: str | None = None,
+    freshness: str | None = None,
+    store_ids: str | list[str] | None = None,
 ) -> dict[str, Any]:
     normalized_time = (
         time_window
@@ -790,6 +828,27 @@ def _normalize_filters(
         sort_order if sort_order in {value for value, _ in SORT_OPTIONS} else "newest"
     )
 
+    normalized_freshness = (
+        freshness
+        if any(opt[0] == freshness for opt in FRESHNESS_FILTER_OPTIONS)
+        else "all"
+    )
+    freshness_delta = _freshness_delta_for(normalized_freshness)
+    freshness_cutoff = _now_utc() - freshness_delta if freshness_delta else None
+
+    if isinstance(store_ids, str):
+        raw_store_ids = [store_ids]
+    elif store_ids:
+        raw_store_ids = list(store_ids)
+    else:
+        raw_store_ids = []
+    store_id_set: set[str] = set()
+    for raw in raw_store_ids:
+        for piece in str(raw or "").split(","):
+            piece = piece.strip()
+            if piece:
+                store_id_set.add(piece)
+
     return {
         "time_window": normalized_time,
         "time_cutoff": cutoff,
@@ -807,6 +866,9 @@ def _normalize_filters(
         "price_now_max": parsed_price_now_max,
         "sort_choice": sort_choice,
         "search_query": (search or "").strip() if search else None,
+        "freshness_choice": normalized_freshness,
+        "freshness_cutoff": freshness_cutoff,
+        "store_ids": store_id_set,
     }
 
 
@@ -826,6 +888,15 @@ TIME_FILTER_OPTIONS = [
     ("1w", "Last 1 week", timedelta(weeks=1)),
     ("1m", "Last 1 month", timedelta(days=30)),
 ]
+# Freshness filter is keyed on "last seen" (most recent observation per card),
+# not on when the deal was first added. This lets users hide stale cards where
+# no store has been re-scraped recently.
+FRESHNESS_FILTER_OPTIONS = [
+    ("all", "Any freshness", None),
+    ("24h", "Seen in last 24h", timedelta(days=1)),
+    ("3d", "Seen in last 3 days", timedelta(days=3)),
+    ("1w", "Seen in last week", timedelta(weeks=1)),
+]
 DISCOUNT_FILTER_OPTIONS = [
     ("all", "All Discounts", None, None),
     ("50", "50%+", 50.0, None),
@@ -843,6 +914,83 @@ STOCK_FILTER_OPTIONS = [
     ("5", "5+ Stock", 5, None),
     ("custom", "Custom Range…", None, None),
 ]
+
+
+def _apply_freshness_filter(
+    groups: list[dict[str, Any]], cutoff: datetime | None
+) -> list[dict[str, Any]]:
+    """Drop groups whose most-recent sighting is older than *cutoff*."""
+
+    if cutoff is None:
+        return groups
+    result: list[dict[str, Any]] = []
+    for group in groups:
+        last_seen = _coerce_datetime(group.get("last_seen"))
+        if last_seen is None or last_seen < cutoff:
+            continue
+        result.append(group)
+    return result
+
+
+def _collect_store_pill_options(
+    listings: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build the list of store filter pills from the listings in view.
+
+    Each pill carries the store id (for the query param), a short label (the
+    store number), a longer tooltip (city/state), and a count of how many
+    listings belong to that store. Sorted by count desc so the busiest stores
+    surface first.
+    """
+
+    buckets: dict[str, dict[str, Any]] = {}
+    for listing in listings:
+        sid = str(listing.get("store_id") or "").strip()
+        if not sid:
+            continue
+        bucket = buckets.setdefault(
+            sid,
+            {
+                "store_id": sid,
+                "label": _format_store_label(listing) or f"#{sid}",
+                "tooltip": _format_store_tooltip(listing) or "",
+                "short": sid,
+                "count": 0,
+            },
+        )
+        bucket["count"] += 1
+        # Refresh label/tooltip opportunistically in case later rows have
+        # better metadata (some entries may be missing city/state).
+        label = _format_store_label(listing)
+        if label and len(label) > len(bucket["label"]):
+            bucket["label"] = label
+        tooltip = _format_store_tooltip(listing)
+        if tooltip and len(tooltip) > len(bucket["tooltip"]):
+            bucket["tooltip"] = tooltip
+
+    pills = list(buckets.values())
+    pills.sort(key=lambda b: (-b["count"], b["label"].casefold()))
+    return pills
+
+
+def _filter_items_to_visible_groups(
+    listings: Iterable[dict[str, Any]], groups: Iterable[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Keep only listings that belong to the provided grouped cards."""
+
+    allowed_keys = {
+        group.get("sku") or group.get("history_id")
+        for group in groups
+        if group.get("sku") or group.get("history_id")
+    }
+    if not allowed_keys:
+        return []
+    result: list[dict[str, Any]] = []
+    for listing in listings:
+        listing_key = listing.get("sku") or listing.get("history_id")
+        if listing_key in allowed_keys:
+            result.append(listing)
+    return result
 
 
 def _sort_groups(
@@ -1145,6 +1293,11 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
         "days_since_added": _relative_days(
             listing.get("first_seen") or listing.get("price_started_at")
         ),
+        "freshness_class": _freshness_class(
+            listing.get("observed_at")
+            or listing.get("updated_at")
+            or listing.get("price_started_at")
+        ),
     }
     canonical = _canonical_store_details(listing.get("store_id"))
     if canonical:
@@ -1214,12 +1367,22 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped_list: list[dict[str, Any]] = []
     for bucket in grouped.values():
         stores = bucket["stores"]
-        stores.sort(
-            key=lambda row: (
-                row.get("price") if row.get("price") is not None else float("inf"),
-                row.get("pct_off") if row.get("pct_off") is not None else 0,
-            )
-        )
+        # Sort stores so the most recently-observed sighting is the "primary"
+        # displayed above the fold; break ties by lowest price. This prevents
+        # the card header timestamp from referring to a different store than
+        # the one shown to the user. Raw listings carry datetime objects in
+        # updated_at / price_started_at (observed_at is only added during
+        # serialization, later in the pipeline).
+        _far_past = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+        def _store_sort_key(row: dict[str, Any]):
+            observed = _coerce_datetime(row.get("updated_at")) or _coerce_datetime(
+                row.get("price_started_at")
+            ) or _coerce_datetime(row.get("first_seen")) or _far_past
+            price = row.get("price")
+            return (-observed.timestamp(), price if price is not None else float("inf"))
+
+        stores.sort(key=_store_sort_key)
         prices = [row.get("price") for row in stores if row.get("price") is not None]
         # Always recalculate discounts from price/price_was for accuracy
         # This fixes data where pct_off was incorrectly stored as 0 or wrong values
@@ -1234,10 +1397,16 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         # For the headline max discount, use the best store (lowest price) with its price_was
         # This ensures the badge shows the actual best deal percentage
+        min_price_store = None
         if stores:
-            best_store = min(stores, key=lambda r: r.get("price") or float("inf"))
-            best_price = best_store.get("price")
-            best_price_was = best_store.get("price_was")
+            min_price_store = min(
+                stores,
+                key=lambda r: r.get("price")
+                if r.get("price") is not None
+                else float("inf"),
+            )
+            best_price = min_price_store.get("price")
+            best_price_was = min_price_store.get("price_was")
             if best_price and best_price_was and best_price_was > best_price:
                 best_discount = _calculate_discount_pct(best_price, best_price_was)
                 if best_discount > 0 and (
@@ -1270,13 +1439,14 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bucket["min_savings"] = min(savings) if savings else None
         bucket["max_savings"] = max(savings) if savings else None
         bucket["locations"] = len(stores)
-        if stores:
-            best_store = stores[0]
-            bucket["best_product_url"] = best_store.get(
+        if min_price_store:
+            bucket["best_product_url"] = min_price_store.get(
                 "store_product_url"
-            ) or best_store.get("product_url")
+            ) or min_price_store.get("product_url")
+            bucket["best_store_id"] = min_price_store.get("store_id")
         else:
             bucket["best_product_url"] = None
+            bucket["best_store_id"] = None
         bucket["days_since_added"] = bucket.get("days_since_added") or _relative_days(
             bucket.get("added_at")
         )
@@ -1294,10 +1464,15 @@ def _group_listings(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
     stores = group.get("stores", [])
 
-    # Get price_was from the store with min_price (stores are already sorted by price)
-    # This ensures we show the correct "was" price for the best deal
-    best_store = stores[0] if stores else None
-    best_price_was = best_store.get("price_was") if best_store else None
+    # Stores are sorted by recency (newest first). For the card's "was" price
+    # label we want the price_was that pairs with min_price, not with the newest
+    # sighting. Find the cheapest store explicitly.
+    min_price_store = (
+        min(stores, key=lambda r: r.get("price") if r.get("price") is not None else float("inf"))
+        if stores
+        else None
+    )
+    best_price_was = min_price_store.get("price_was") if min_price_store else None
 
     # Still collect all price_was values for range calculation
     price_was_values = [
@@ -1332,7 +1507,9 @@ def _serialize_group(group: dict[str, Any]) -> dict[str, Any]:
         "days_since_added": group.get("days_since_added")
         or _relative_days(group.get("added_at")),
         "best_product_url": group.get("best_product_url"),
+        "best_store_id": group.get("best_store_id"),
         "stores": [_serialize_listing(store) for store in stores],
+        "freshness_class": _freshness_class(group.get("last_seen")),
     }
     return payload
 
@@ -1594,10 +1771,12 @@ def _select_items(
             session, state=state, category=None, region=region
         )
 
-    # Free tier sees only older deals (3+ days old)
-    # This applies to BOTH main page and "new today" page
+    # Free tier sees deals whose most recent sighting is at least 1 day old.
+    # The 1-day window is a compromise: paid users still get the last 24h
+    # exclusively, while free users see a substantial pool (1-30d) instead of
+    # an almost-empty "abandoned deals only" view.
     return repo.get_older_clearance_items(
-        session, state=state, category=None, region=region, min_days_old=3
+        session, state=state, category=None, region=region, min_days_old=1
     )
 
 
@@ -1841,11 +2020,28 @@ def _render_dashboard(
     )
     category_filtered = _apply_category_filter(state_filtered, category)
 
-    items = _apply_filters(category_filtered, filters=filters)
-    # Count unique stores across all listings
+    # Run filters first *without* applying the store selector so we can build
+    # the pill list from the full set of stores the user could pick. Applying
+    # the store filter would hide the other pills and strand the user.
+    pre_store_items = _apply_filters(
+        category_filtered, filters=filters, apply_store_filter=False
+    )
+    pre_store_groups = _group_listings(pre_store_items)
+    pre_store_groups = _apply_freshness_filter(
+        pre_store_groups, filters.get("freshness_cutoff")
+    )
+    pre_store_visible_items = _filter_items_to_visible_groups(
+        pre_store_items, pre_store_groups
+    )
+    store_filter_options = _collect_store_pill_options(pre_store_visible_items)
+
+    filtered_items = _apply_filters(category_filtered, filters=filters)
+    grouped = _group_listings(filtered_items)
+    grouped = _apply_freshness_filter(grouped, filters.get("freshness_cutoff"))
+    items = _filter_items_to_visible_groups(filtered_items, grouped)
+    # Count unique stores across all visible listings.
     unique_store_ids = {item.get("store_id") for item in items if item.get("store_id")}
     store_count = len(unique_store_ids)
-    grouped = _group_listings(items)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     serialized_groups = [_serialize_group(group) for group in grouped]
     initial_groups = serialized_groups[:INITIAL_GROUP_BATCH]
@@ -1897,9 +2093,12 @@ def _render_dashboard(
             "format_regional_full_timestamp": format_regional_full_timestamp,
             "filters": filters,
             "time_filter_options": TIME_FILTER_OPTIONS,
+            "freshness_filter_options": FRESHNESS_FILTER_OPTIONS,
             "discount_filter_options": DISCOUNT_FILTER_OPTIONS,
             "stock_filter_options": STOCK_FILTER_OPTIONS,
             "sort_filter_options": SORT_OPTIONS,
+            "store_filter_options": store_filter_options,
+            "selected_store_ids": filters.get("store_ids") or set(),
             "is_pro": is_pro,
             "subscription_plan": subscription_plan,
         },
@@ -1987,6 +2186,8 @@ def list_clearance(
     price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
     price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
+    freshness: str = Query("all", description="Freshness filter keyed on last sighting."),
+    store_ids: list[str] | None = Query(None, description="Limit results to these store ids."),
     session: Session = Depends(get_session),
 ):
     """Render the Florida clearance dashboard (default view)."""
@@ -2006,6 +2207,8 @@ def list_clearance(
         price_now_max=price_now_max,
         sort_order=sort_order,
         search=search,
+        freshness=freshness,
+        store_ids=store_ids,
     )
 
     return _render_dashboard(
@@ -2046,6 +2249,8 @@ def list_pnw_clearance(
     price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
     price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
+    freshness: str = Query("all", description="Freshness filter keyed on last sighting."),
+    store_ids: list[str] | None = Query(None, description="Limit results to these store ids."),
     session: Session = Depends(get_session),
 ):
     """Render the Pacific NW (WA/OR) clearance dashboard."""
@@ -2066,6 +2271,8 @@ def list_pnw_clearance(
         price_now_max=price_now_max,
         sort_order=sort_order,
         search=search,
+        freshness=freshness,
+        store_ids=store_ids,
     )
 
     return _render_dashboard(
@@ -2105,6 +2312,8 @@ def list_new_clearance_today(
     price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
     price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
+    freshness: str = Query("all", description="Freshness filter keyed on last sighting."),
+    store_ids: list[str] | None = Query(None, description="Limit results to these store ids."),
     session: Session = Depends(get_session),
 ):
     """Render new items for Florida (default)."""
@@ -2124,6 +2333,8 @@ def list_new_clearance_today(
         price_now_max=price_now_max,
         sort_order=sort_order,
         search=search,
+        freshness=freshness,
+        store_ids=store_ids,
     )
 
     return _render_dashboard(
@@ -2165,6 +2376,8 @@ def list_pnw_new_today(
     price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
     price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
+    freshness: str = Query("all", description="Freshness filter keyed on last sighting."),
+    store_ids: list[str] | None = Query(None, description="Limit results to these store ids."),
     session: Session = Depends(get_session),
 ):
     """Render new items for Pacific NW."""
@@ -2185,6 +2398,8 @@ def list_pnw_new_today(
         price_now_max=price_now_max,
         sort_order=sort_order,
         search=search,
+        freshness=freshness,
+        store_ids=store_ids,
     )
 
     return _render_dashboard(
@@ -2389,6 +2604,8 @@ def api_clearance(
     price_now_min: str | None = Query(None, description="Minimum current price (now price)."),
     price_now_max: str | None = Query(None, description="Maximum current price (now price)."),
     sort_order: str = Query("newest", description="Sort order key."),
+    freshness: str = Query("all", description="Freshness filter keyed on last sighting."),
+    store_ids: list[str] | None = Query(None, description="Limit results to these store ids."),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
     """Return clearance items as JSON data."""
@@ -2412,6 +2629,8 @@ def api_clearance(
         price_now_max=price_now_max,
         sort_order=sort_order,
         search=search,
+        freshness=freshness,
+        store_ids=store_ids,
     )
     raw_items = _select_items(
         session,
@@ -2424,8 +2643,10 @@ def api_clearance(
     prepared_items = _prepare_listings(raw_items)
     state_filtered = _filter_by_state(prepared_items, normalized_state)
     category_filtered = _apply_category_filter(state_filtered, normalized_category)
-    items = _apply_filters(category_filtered, filters=filters)
-    grouped = _group_listings(items)
+    filtered_items = _apply_filters(category_filtered, filters=filters)
+    grouped = _group_listings(filtered_items)
+    grouped = _apply_freshness_filter(grouped, filters.get("freshness_cutoff"))
+    items = _filter_items_to_visible_groups(filtered_items, grouped)
     grouped = _sort_groups(grouped, filters.get("sort_choice"))
     payload = [_serialize_observation(item) for item in items]
     grouped_payload = [_serialize_group(group) for group in grouped]
@@ -2441,6 +2662,8 @@ def api_clearance(
         "stock_min": filters.get("stock_min"),
         "stock_max": filters.get("stock_max"),
         "sort_choice": filters.get("sort_choice"),
+        "freshness_choice": filters.get("freshness_choice"),
+        "store_ids": sorted(filters.get("store_ids") or []),
     }
     return JSONResponse(
         content={

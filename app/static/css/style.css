@@ -1989,6 +1989,134 @@ input[type="text"]:focus,
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   FRESHNESS INDICATORS (per-store staleness on deal cards)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* >24h old — soft amber wash with a ribbon accent on the leading edge */
+.store-card.is-stale-warn {
+    background: #fffbeb;
+    border-color: #fde68a;
+    box-shadow: inset 3px 0 0 0 var(--warning);
+}
+.store-card.is-stale-warn:hover {
+    background: #fef3c7;
+    border-color: #f59e0b;
+}
+.store-card.primary.is-stale-warn {
+    background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fcd34d;
+}
+.store-card.is-stale-warn .store-observed {
+    color: #92400e;
+    font-weight: 600;
+}
+.store-card.is-stale-warn .store-observed::before {
+    content: "⚠ ";
+}
+
+/* >48h old — stronger red wash + ribbon; signals genuine risk of stale data */
+.store-card.is-stale-alert {
+    background: #fef2f2;
+    border-color: #fecaca;
+    box-shadow: inset 3px 0 0 0 var(--danger);
+}
+.store-card.is-stale-alert:hover {
+    background: #fee2e2;
+    border-color: var(--danger);
+}
+.store-card.primary.is-stale-alert {
+    background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fca5a5;
+}
+.store-card.is-stale-alert .store-observed {
+    color: #991b1b;
+    font-weight: 700;
+}
+.store-card.is-stale-alert .store-observed::before {
+    content: "⚠ ";
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STORE PILL FILTERS (dynamic, generated from current result set)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.store-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 16px;
+    margin: 0 0 16px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.store-pills__label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.store-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: var(--font-body);
+    white-space: nowrap;
+}
+
+.store-pill:hover {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: var(--accent-blue-soft);
+    transform: translateY(-1px);
+}
+
+.store-pill.is-active {
+    background: var(--accent-blue);
+    color: white;
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-sm);
+}
+
+.store-pill.is-active:hover {
+    background: var(--accent-blue-dark);
+    color: white;
+}
+
+.store-pill__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-blue-soft);
+    color: var(--accent-blue-dark);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.store-pill.is-active .store-pill__count {
+    background: rgba(255, 255, 255, 0.22);
+    color: white;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    ACCESSIBILITY: prefers-reduced-motion
    ═══════════════════════════════════════════════════════════════════════════ */
 

@@ -75,6 +75,17 @@
       </select>
     </div>
     <div class="filter-group">
+      <label for="freshness" class="form-label">Freshness</label>
+      <select id="freshness" name="freshness">
+        {% for value, label, _ in freshness_filter_options %}
+        <option value="{{ value }}" {% if filters.freshness_choice==value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% for sid in selected_store_ids %}
+    <input type="hidden" name="store_ids" value="{{ sid }}">
+    {% endfor %}
+    <div class="filter-group">
       <label for="discount_filter" class="form-label">Discount</label>
       <select id="discount_filter" name="discount_filter">
         {% for value, label, _, _ in discount_filter_options %}
@@ -134,6 +145,50 @@
     <button type="button" class="quick-filter-chip" data-price-max="25">Under $25</button>
     <button type="button" class="quick-filter-chip" data-price-max="50">Under $50</button>
   </div>
+
+  {% if store_filter_options %}
+  <div class="store-pills" id="store-pills" role="toolbar" aria-label="Filter by store">
+    <span class="store-pills__label">Store:</span>
+    <button type="button" class="store-pill{% if not selected_store_ids %} is-active{% endif %}"
+      data-store-id="" aria-pressed="{{ 'true' if not selected_store_ids else 'false' }}">
+      All stores
+    </button>
+    {% for pill in store_filter_options %}
+    <button type="button"
+      class="store-pill{% if pill.store_id in selected_store_ids %} is-active{% endif %}"
+      data-store-id="{{ pill.store_id }}"
+      title="{{ pill.tooltip or pill.label }}"
+      aria-pressed="{{ 'true' if pill.store_id in selected_store_ids else 'false' }}">
+      <span class="store-pill__label">{{ pill.label }}</span>
+      <span class="store-pill__count">{{ pill.count }}</span>
+    </button>
+    {% endfor %}
+  </div>
+  <script>
+    (function () {
+      var row = document.getElementById('store-pills');
+      if (!row) return;
+      row.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.store-pill');
+        if (!btn) return;
+        var params = new URLSearchParams(window.location.search);
+        var id = btn.getAttribute('data-store-id');
+        var selected = params.getAll('store_ids').filter(Boolean);
+        if (!id) {
+          params.delete('store_ids');
+        } else if (selected.includes(id)) {
+          var kept = selected.filter(function (s) { return s !== id; });
+          params.delete('store_ids');
+          kept.forEach(function (s) { params.append('store_ids', s); });
+        } else {
+          params.append('store_ids', id);
+        }
+        var qs = params.toString();
+        window.location.search = qs ? ('?' + qs) : '';
+      });
+    })();
+  </script>
+  {% endif %}
 
   <div id="cards-grid" class="deals-grid">
     <!-- Cards will be rendered here by JavaScript or server-side loop -->
@@ -203,7 +258,7 @@
           {% if group.stores %}
           {% set primary_store = group.stores[0] %}
           <!-- Primary Store -->
-          <div class="store-card primary" data-store-name="{{ primary_store.store_label }}"
+          <div class="store-card primary {{ primary_store.freshness_class }}" data-store-name="{{ primary_store.store_label }}"
             role="button" tabindex="0" onclick="copyStoreFromElement(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyStoreFromElement(this);}">
             <div class="store-card-content">
               <div class="store-name-row">
@@ -242,7 +297,7 @@
             </button>
             <div class="stores-list-scroll">
               {% for store in group.stores[1:] %}
-              <div class="store-card secondary" data-store-name="{{ store.store_label }}"
+              <div class="store-card secondary {{ store.freshness_class }}" data-store-name="{{ store.store_label }}"
                 role="button" tabindex="0" onclick="copyStoreFromElement(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyStoreFromElement(this);}">
                 <div class="store-card-content">
                   <div class="store-name-row">
@@ -276,7 +331,7 @@
       </div>
       <div class="deal-card__footer">
         <button class="btn-save-deal"
-          onclick="saveDeal('{{ group.stores[0].store_id if group.stores else '' }}', '{{ group.sku }}')">
+          onclick="saveDeal('{{ group.best_store_id or (group.stores[0].store_id if group.stores else '') }}', '{{ group.sku }}')">
           <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z"/></svg>
           <span>Save Deal</span>
         </button>
