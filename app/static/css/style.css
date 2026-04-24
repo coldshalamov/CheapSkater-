@@ -1994,20 +1994,20 @@ input[type="text"]:focus,
 
 /* >24h old — soft amber wash with a ribbon accent on the leading edge */
 .store-card.is-stale-warn {
-    background: #fffbeb;
-    border-color: #fde68a;
-    box-shadow: inset 3px 0 0 0 var(--warning);
+    background: #fef08a;
+    border-color: #fde047;
+    box-shadow: inset 4px 0 0 0 #eab308;
 }
 .store-card.is-stale-warn:hover {
-    background: #fef3c7;
-    border-color: #f59e0b;
+    background: #fde047;
+    border-color: #facc15;
 }
 .store-card.primary.is-stale-warn {
-    background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
-    border-color: #fcd34d;
+    background: linear-gradient(180deg, #fef08a 0%, #fde047 100%);
+    border-color: #facc15;
 }
 .store-card.is-stale-warn .store-observed {
-    color: #92400e;
+    color: #854d0e;
     font-weight: 600;
 }
 .store-card.is-stale-warn .store-observed::before {
@@ -2016,17 +2016,17 @@ input[type="text"]:focus,
 
 /* >48h old — stronger red wash + ribbon; signals genuine risk of stale data */
 .store-card.is-stale-alert {
-    background: #fef2f2;
-    border-color: #fecaca;
-    box-shadow: inset 3px 0 0 0 var(--danger);
+    background: #fecaca;
+    border-color: #f87171;
+    box-shadow: inset 4px 0 0 0 #ef4444;
 }
 .store-card.is-stale-alert:hover {
-    background: #fee2e2;
-    border-color: var(--danger);
+    background: #fca5a5;
+    border-color: #ef4444;
 }
 .store-card.primary.is-stale-alert {
-    background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
-    border-color: #fca5a5;
+    background: linear-gradient(180deg, #fecaca 0%, #fca5a5 100%);
+    border-color: #f87171;
 }
 .store-card.is-stale-alert .store-observed {
     color: #991b1b;

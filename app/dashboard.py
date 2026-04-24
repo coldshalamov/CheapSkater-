@@ -1298,6 +1298,11 @@ def _serialize_listing(listing: dict[str, Any]) -> dict[str, Any]:
             or listing.get("updated_at")
             or listing.get("price_started_at")
         ),
+        "days_since_observed": _relative_days(
+            listing.get("observed_at")
+            or listing.get("updated_at")
+            or listing.get("price_started_at")
+        ),
     }
     canonical = _canonical_store_details(listing.get("store_id"))
     if canonical:

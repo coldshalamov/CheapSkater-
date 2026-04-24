@@ -138,6 +138,18 @@
   <script>if(localStorage.getItem('hide_upsell')==='1'){var b=document.getElementById('upsell-banner');if(b)b.style.display='none';}</script>
   {% endif %}
 
+  <div class="info-banner" style="background: #fffbeb; border: 1px solid #fde047; color: #92400e; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+    <span><strong>⚠ Warning:</strong> These are extreme hidden local markdown sales and these deals go fast!</span>
+    <span style="font-size: 0.85rem; display: flex; align-items: center; gap: 12px; font-weight: 600;">
+      <span style="display: inline-flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 14px; height: 14px; background: linear-gradient(180deg, #fef08a 0%, #fde047 100%); border: 1px solid #facc15; border-radius: 3px;"></span> 1+ day old
+      </span>
+      <span style="display: inline-flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 14px; height: 14px; background: linear-gradient(180deg, #fecaca 0%, #fca5a5 100%); border: 1px solid #f87171; border-radius: 3px;"></span> 2+ days old
+      </span>
+    </span>
+  </div>
+
   <div class="quick-filters">
     <span class="quick-filters__label">Quick:</span>
     <button type="button" class="quick-filter-chip" data-discount="75">75%+ Off</button>
@@ -282,7 +294,13 @@
               </div>
               {% if primary_store.observed_at %}
               <div class="store-observed">
+                {% if primary_store.days_since_observed == 1 %}
+                Seen 1 day ago on {{ format_regional_full_timestamp(primary_store.observed_at, region) }}
+                {% elif primary_store.days_since_observed and primary_store.days_since_observed > 1 %}
+                Seen {{ primary_store.days_since_observed }} days ago on {{ format_regional_full_timestamp(primary_store.observed_at, region) }}
+                {% else %}
                 Seen at this store {{ format_regional_full_timestamp(primary_store.observed_at, region) }}
+                {% endif %}
               </div>
               {% endif %}
             </div>
@@ -315,7 +333,13 @@
                   </div>
                   {% if store.observed_at %}
                   <div class="store-observed">
+                    {% if store.days_since_observed == 1 %}
+                    Seen 1 day ago on {{ format_regional_full_timestamp(store.observed_at, region) }}
+                    {% elif store.days_since_observed and store.days_since_observed > 1 %}
+                    Seen {{ store.days_since_observed }} days ago on {{ format_regional_full_timestamp(store.observed_at, region) }}
+                    {% else %}
                     Seen at this store {{ format_regional_full_timestamp(store.observed_at, region) }}
+                    {% endif %}
                   </div>
                   {% endif %}
                 </div>
